@@ -55,6 +55,14 @@ body {
   white-space: nowrap;
 }
 
+.lobby-status {
+  min-height: 20px;
+  margin: 0 0 12px;
+  color: #d8ecf8;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
 .start-panel button {
   width: 100%;
   height: 44px;
@@ -66,8 +74,7 @@ body {
   cursor: pointer;
 }
 
-.start-panel a,
-.hub-link {
+.start-panel a {
   display: inline-block;
   margin-top: 14px;
   color: #cfefff;
@@ -79,8 +86,7 @@ body {
   pointer-events: none;
 }
 
-.hub-link {
-  pointer-events: auto;
+.esc-hint {
   position: fixed;
   left: 18px;
   top: 14px;
@@ -88,6 +94,9 @@ body {
   padding: 7px 10px;
   background: rgba(10, 15, 23, 0.62);
   border-radius: 6px;
+  color: #d8ecf8;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .size-readout {
@@ -146,6 +155,61 @@ body {
   font-size: 14px;
 }
 
+.pause-menu {
+  position: fixed;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(4, 8, 14, 0.54);
+  pointer-events: auto;
+}
+
+.gl-pause-card {
+  width: min(420px, calc(100vw - 40px));
+  padding: 22px;
+  background: rgba(17, 28, 41, 0.94);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 8px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.42);
+  text-align: center;
+}
+
+.gl-pause-card h2 {
+  margin: 0 0 12px;
+  font-size: 30px;
+  line-height: 1;
+}
+
+.pause-controls {
+  margin: 0 0 18px;
+  color: #b9d5e8;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.gl-pause-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.gl-btn {
+  flex: 1;
+  min-height: 42px;
+  border: 0;
+  border-radius: 6px;
+  background: #60d16d;
+  color: #122016;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.gl-btn--ghost {
+  background: rgba(255, 255, 255, 0.08);
+  color: #eaf6ff;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+}
+
 .eat-overlay {
   position: fixed;
   inset: 0;
@@ -177,5 +241,9 @@ body {
 
   .eat-overlay {
     font-size: 32px;
+  }
+
+  .gl-pause-actions {
+    flex-direction: column;
   }
 }

@@ -23,17 +23,29 @@
         <a href="https://games.greglab.net">(change at Hub)</a>
       </p>
       <input type="hidden" id="nameInput" />
+      <p id="lobbyStatus" class="lobby-status" aria-live="polite"></p>
       <button id="playButton" type="button">Play</button>
       <a id="hubLinkStart" href="https://games.greglab.net">Back to Games Hub</a>
     </div>
 
     <div id="hud" class="hud hidden">
-      <a id="hubLinkHud" class="hub-link" href="https://games.greglab.net">Back to Games Hub</a>
+      <div id="escHint" class="esc-hint hidden">Esc · pause / exit</div>
       <div class="size-readout" id="sizeReadout">Size: 1.0u</div>
       <div class="wallet" id="walletReadout"></div>
       <div class="leaderboard">
         <div class="leaderboard-title">Leaderboard</div>
         <ol id="leaderboardList"></ol>
+      </div>
+    </div>
+
+    <div id="pauseMenu" class="pause-menu hidden">
+      <div class="gl-pause-card">
+        <h2>Paused</h2>
+        <p class="pause-controls">WASD move · Shift run · Space jump · Mouse look · Press Esc to pause / exit</p>
+        <div class="gl-pause-actions">
+          <button id="resumeButton" class="gl-btn" type="button">Resume</button>
+          <button id="exitLobbyButton" class="gl-btn gl-btn--ghost" type="button">Exit to Lobby</button>
+        </div>
       </div>
     </div>
 

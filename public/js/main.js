@@ -15,12 +15,15 @@ const leaderboardList = document.getElementById("leaderboardList");
 const eatOverlay = document.getElementById("eatOverlay");
 const eatCountdown = document.getElementById("eatCountdown");
 const hubLinkStart = document.getElementById("hubLinkStart");
-const hubLinkHud = document.getElementById("hubLinkHud");
+const escHint = document.getElementById("escHint");
+const pauseMenu = document.getElementById("pauseMenu");
+const resumeButton = document.getElementById("resumeButton");
+const exitLobbyButton = document.getElementById("exitLobbyButton");
+const lobbyStatus = document.getElementById("lobbyStatus");
 
 const identity = window.GreglabGames?.getIdentity?.() || { token: null, name: null };
 const lobbyUrl = window.GreglabGames?.lobbyUrl?.() || "https://games.greglab.net";
 hubLinkStart.href = lobbyUrl;
-hubLinkHud.href = lobbyUrl;
 nameInput.value = identity.name || "";
 playerNameText.textContent = identity.name || "Guest";
 
@@ -34,6 +37,7 @@ let walletCoins = null;
 const keys = new Set();
 const blocks = new Map();
 const players = new Map();
+let lobbyStatusTimer = null;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#70c8ee");
@@ -309,13 +313,76 @@ function sendInput() {
   });
 }
 
+function updatePauseUi() {
+  const pointerLocked = document.pointerLockElement === canvas;
+  if (!joined) {
+    pauseMenu?.classList.add("hidden");
+    escHint?.classList.add("hidden");
+    return;
+  }
+
+  if (pointerLocked) {
+    pauseMenu?.classList.add("hidden");
+    escHint?.classList.remove("hidden");
+    return;
+  }
+
+  keys.clear();
+  pauseMenu?.classList.remove("hidden");
+  escHint?.classList.add("hidden");
+}
+
+async function refreshLobbyStatus() {
+  if (joined || startPanel.classList.contains("hidden")) return;
+  try {
+    const response = await fetch("/api/status", { cache: "no-store" });
+    if (!response.ok) throw new Error(`Status failed: ${response.status}`);
+    const data = await response.json();
+    const playersPlaying = Number.isFinite(data.players) ? data.players : 0;
+    if (!lobbyStatus || !playButton) return;
+    if (playersPlaying > 0) {
+      const noun = playersPlaying === 1 ? "player" : "players";
+      lobbyStatus.textContent = `Game in progress - ${playersPlaying} ${noun} playing. Jump in!`;
+      playButton.textContent = "Join Game";
+    } else {
+      lobbyStatus.textContent = "No game in progress yet - be the first!";
+      playButton.textContent = "Play";
+    }
+  } catch (error) {
+    if (lobbyStatus) lobbyStatus.textContent = "";
+    if (playButton) playButton.textContent = "Play";
+  }
+}
+
+function startLobbyStatusPolling() {
+  refreshLobbyStatus();
+  lobbyStatusTimer = window.setInterval(refreshLobbyStatus, 4000);
+}
+
+function stopLobbyStatusPolling() {
+  if (!lobbyStatusTimer) return;
+  window.clearInterval(lobbyStatusTimer);
+  lobbyStatusTimer = null;
+}
+
 playButton.addEventListener("click", () => {
   if (joined) return;
   joined = true;
+  stopLobbyStatusPolling();
   startPanel.classList.add("hidden");
   hud.classList.remove("hidden");
   socket.emit("hello", { glToken: identity.token, name: identity.name || "" });
   canvas.requestPointerLock?.();
+  updatePauseUi();
+});
+
+resumeButton?.addEventListener("click", () => {
+  if (!joined) return;
+  canvas.requestPointerLock?.();
+});
+
+exitLobbyButton?.addEventListener("click", () => {
+  window.location.href = lobbyUrl;
 });
 
 document.addEventListener("keydown", (event) => {
@@ -337,6 +404,8 @@ document.addEventListener("mousemove", (event) => {
 canvas.addEventListener("click", () => {
   if (joined) canvas.requestPointerLock?.();
 });
+
+document.addEventListener("pointerlockchange", updatePauseUi);
 
 window.addEventListener("resize", () => {
   camera.aspect = window.innerWidth / window.innerHeight;
@@ -429,5 +498,6 @@ function normalizeAngle(angle) {
 }
 
 rebuildArena(worldSize);
+startLobbyStatusPolling();
 animate();
 })();
