@@ -28,7 +28,7 @@ let selfId = null;
 let worldSize = 180;
 let joined = false;
 let yaw = 0;
-let pitch = -0.18;
+let pitch = 0.18;
 let walletCoins = null;
 
 const keys = new Set();
@@ -74,6 +74,15 @@ scene.add(wallGroup);
 
 const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
 const materialCache = new Map();
+const windowMaterial = new THREE.MeshStandardMaterial({
+  color: "#bfe4f5",
+  transparent: true,
+  opacity: 0.8,
+  roughness: 0.18,
+  metalness: 0.02,
+  emissive: "#6baec8",
+  emissiveIntensity: 0.16,
+});
 
 function material(color) {
   if (!materialCache.has(color)) {
@@ -227,7 +236,8 @@ function removePlayer(id) {
 }
 
 function createBlock(block) {
-  const mesh = new THREE.Mesh(blockGeometry, material(block.color || "#aa604b"));
+  const blockMat = block.kind === "window" ? windowMaterial : material(block.color || "#aa604b");
+  const mesh = new THREE.Mesh(blockGeometry, blockMat);
   mesh.position.set(block.x, block.y, block.z);
   mesh.castShadow = true;
   mesh.receiveShadow = true;
@@ -321,7 +331,7 @@ document.addEventListener("keyup", (event) => {
 document.addEventListener("mousemove", (event) => {
   if (document.pointerLockElement !== canvas) return;
   yaw -= event.movementX * 0.0022;
-  pitch = Math.max(-1.4, Math.min(0.6, pitch - event.movementY * 0.0014));
+  pitch = Math.max(-0.35, Math.min(1.35, pitch + event.movementY * 0.0018));
 });
 
 canvas.addEventListener("click", () => {
@@ -393,15 +403,17 @@ function animate() {
     const pos = self.group.position;
     const size = Math.max(1, self.current.size);
     const distance = 8 + Math.sqrt(size) * 4.4;
-    const height = 4 + Math.sqrt(size) * 2.7;
-    const lookHeight = 1.2 + Math.sqrt(size) * 0.75 + Math.sin(pitch) * distance * 0.75;
+    const eyeHeight = 1.5 + Math.sqrt(size) * 1.5;
+    const elev = pitch;
+    const horiz = distance * Math.cos(elev);
+    const vert = distance * Math.sin(elev);
     const cameraTarget = new THREE.Vector3(
-      pos.x - Math.sin(yaw) * distance,
-      pos.y + height - Math.sin(pitch) * 3.2,
-      pos.z - Math.cos(yaw) * distance
+      pos.x - Math.sin(yaw) * horiz,
+      Math.max(0.85, pos.y + eyeHeight + vert),
+      pos.z - Math.cos(yaw) * horiz
     );
     camera.position.lerp(cameraTarget, 0.18);
-    camera.lookAt(pos.x, pos.y + lookHeight, pos.z);
+    camera.lookAt(pos.x, pos.y + eyeHeight * 0.5, pos.z);
   } else {
     camera.position.set(25, 26, 35);
     camera.lookAt(0, 0, 0);

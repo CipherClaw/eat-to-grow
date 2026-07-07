@@ -18,7 +18,7 @@ const MIN_PLAYER_SIZE = 0.75;
 const SHADOW_EAT_SECONDS = 3;
 const GRAVITY = 22;
 const JUMP_IMPULSE = 11.8;
-const FLOOR_SPACING = 3;
+const FLOOR_SPACING = 6;
 const GROUND_EPSILON = 0.08;
 const STEP_TOLERANCE = 0.34;
 const GAME_ID = "eat-to-grow";
@@ -81,7 +81,7 @@ function playerRadius(size) {
 }
 
 function playerHeight(size) {
-  return Math.max(1, size);
+  return Math.max(1.6, Math.pow(size, 0.45) * 2.4);
 }
 
 function shadowRadius(size) {
@@ -89,10 +89,10 @@ function shadowRadius(size) {
 }
 
 function moveSpeed(size, running) {
-  const base = running ? 14.4 : 10.6;
-  const smallBonus = clamp((1.7 - size) * 1.45, 0, 1.15);
-  const grownPenalty = 1 + Math.max(0, size - 1) * 0.12;
-  return clamp((base + smallBonus) / grownPenalty, running ? 3.2 : 2.6, base + smallBonus);
+  const base = running ? 26 : 18;
+  const floor = running ? 9 : 6;
+  const decay = 1 + (Math.sqrt(Math.max(1, size)) - 1) * 0.25;
+  return clamp(base / decay, floor, base);
 }
 
 function cellKey(x, z) {
@@ -100,7 +100,7 @@ function cellKey(x, z) {
 }
 
 function isSolidBlock(block) {
-  return block.kind === "building";
+  return block.kind === "building" || block.kind === "window";
 }
 
 function addToCellIndex(index, block) {
@@ -174,12 +174,17 @@ function addBlock(x, y, z, kind, color, value = 0.055) {
 function addVoxelWall(cx, cz, width, depth, floors, color) {
   const halfW = Math.floor(width / 2);
   const halfD = Math.floor(depth / 2);
+  const windowColor = "#bfe4f5";
   for (let level = 0; level < floors; level++) {
     for (let x = -halfW; x <= halfW; x++) {
       for (let z = -halfD; z <= halfD; z++) {
         const edge = x === -halfW || x === halfW || z === -halfD || z === halfD;
-        const windowGap = level > 0 && ((x + z + level) % 4 === 0);
-        if (edge && !windowGap) addBlock(cx + x, level + 0.5, cz + z, "building", color, 0.05);
+        if (!edge) continue;
+        const nearCorner = (Math.abs(x) === halfW && Math.abs(z) >= halfD - 1) || (Math.abs(z) === halfD && Math.abs(x) >= halfW - 1);
+        const upperFloor = level >= 2 && level % 2 === 0;
+        const windowPattern = upperFloor && !nearCorner && ((x * 3 + z * 5 + level) % 7 === 0);
+        const kind = windowPattern ? "window" : "building";
+        addBlock(cx + x, level + 0.5, cz + z, kind, windowPattern ? windowColor : color, 0.05);
       }
     }
   }
@@ -187,10 +192,24 @@ function addVoxelWall(cx, cz, width, depth, floors, color) {
     const y = top - 0.5;
     for (let x = -halfW + 1; x <= halfW - 1; x++) {
       for (let z = -halfD + 1; z <= halfD - 1; z++) {
-        const stairwell = Math.abs(x) <= 1 && Math.abs(z) <= 1 && top % (FLOOR_SPACING * 2) === 0;
+        const stairwell = Math.abs(x) <= 1 && Math.abs(z) <= 1;
         if (!stairwell) addBlock(cx + x, y, cz + z, "building", color, 0.035);
       }
     }
+  }
+  const stairs = [
+    [-1, -1],
+    [0, -1],
+    [1, -1],
+    [1, 0],
+    [1, 1],
+    [0, 1],
+    [-1, 1],
+    [-1, 0],
+  ];
+  for (let step = 0; step < floors; step++) {
+    const [x, z] = stairs[step % stairs.length];
+    addBlock(cx + x, step + 0.5, cz + z, "building", color, 0.03);
   }
 }
 
@@ -205,18 +224,18 @@ function addTree(cx, cz) {
 
 function generateArena() {
   const buildings = [
-    [-102, -88, 12, 14, 10, "#a65a47"],
-    [-58, -98, 16, 10, 18, "#b18470"],
-    [8, -94, 13, 15, 14, "#9a7860"],
-    [78, -84, 15, 13, 22, "#b86a4f"],
-    [105, -24, 10, 18, 12, "#a86d55"],
-    [58, 28, 18, 14, 24, "#c08d7a"],
-    [2, 14, 14, 12, 16, "#946c55"],
-    [-58, 30, 13, 18, 13, "#aa8064"],
-    [-108, 82, 12, 12, 9, "#b85d42"],
-    [-28, 102, 17, 11, 20, "#8f7462"],
-    [48, 100, 14, 14, 17, "#b77962"],
-    [108, 78, 12, 16, 11, "#9e6250"],
+    [-104, -88, 16, 18, 18, "#a65a47"],
+    [-58, -98, 20, 14, 30, "#b18470"],
+    [10, -94, 17, 19, 24, "#9a7860"],
+    [80, -84, 19, 17, 38, "#b86a4f"],
+    [106, -24, 14, 22, 20, "#a86d55"],
+    [58, 28, 22, 18, 42, "#c08d7a"],
+    [2, 14, 18, 16, 28, "#946c55"],
+    [-60, 30, 17, 22, 24, "#aa8064"],
+    [-108, 82, 16, 16, 14, "#b85d42"],
+    [-28, 102, 21, 15, 34, "#8f7462"],
+    [48, 100, 18, 18, 30, "#b77962"],
+    [108, 78, 16, 20, 18, "#9e6250"],
   ];
   for (const b of buildings) addVoxelWall(...b);
 
