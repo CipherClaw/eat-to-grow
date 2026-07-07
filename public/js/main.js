@@ -20,6 +20,8 @@ const pauseMenu = document.getElementById("pauseMenu");
 const resumeButton = document.getElementById("resumeButton");
 const exitLobbyButton = document.getElementById("exitLobbyButton");
 const lobbyStatus = document.getElementById("lobbyStatus");
+const staminaFill = document.getElementById("staminaFill");
+const staminaBar = document.getElementById("staminaBar");
 
 const identity = window.GreglabGames?.getIdentity?.() || { token: null, name: null };
 const lobbyUrl = window.GreglabGames?.lobbyUrl?.() || "https://games.greglab.net";
@@ -33,9 +35,17 @@ let joined = false;
 let yaw = 0;
 let pitch = 0.18;
 let walletCoins = null;
+let localPos = { x: 0, y: 0, z: 0 };
+let localVy = 0;
+let localReady = false;
+let localSize = 1;
+let lastFrameTime = performance.now();
+let stamina = 1;
+let sprintLocked = false;
 
 const keys = new Set();
 const blocks = new Map();
+const solidBlockCells = new Map();
 const players = new Map();
 let lobbyStatusTimer = null;
 const cameraRaycaster = new THREE.Raycaster();
@@ -91,11 +101,122 @@ const windowMaterial = new THREE.MeshStandardMaterial({
   emissiveIntensity: 0.16,
 });
 
+const GRAVITY = 22;
+const JUMP_IMPULSE = 11.8;
+const FLOOR_SPACING = 10;
+const GROUND_EPSILON = 0.08;
+const STEP_TOLERANCE = 0.34;
+const PLAYER_VISUAL_BASE_SCALE = 0.55;
+const SPRINT_DRAIN_PER_SECOND = 0.34;
+const SPRINT_RECHARGE_PER_SECOND = 0.24;
+const SPRINT_MIN_CHARGE_TO_START = 0.18;
+
 function material(color) {
   if (!materialCache.has(color)) {
     materialCache.set(color, new THREE.MeshStandardMaterial({ color, roughness: 0.82 }));
   }
   return materialCache.get(color);
+}
+
+function clamp(value, min, max) {
+  return Math.max(min, Math.min(max, value));
+}
+
+function cellKey(x, z) {
+  return `${Math.floor(x)},${Math.floor(z)}`;
+}
+
+function isSolidBlock(block) {
+  return block.kind === "building" || block.kind === "window";
+}
+
+function addToSolidIndex(block) {
+  if (!block.active || !isSolidBlock(block)) return;
+  const key = cellKey(block.x, block.z);
+  if (!solidBlockCells.has(key)) solidBlockCells.set(key, new Set());
+  solidBlockCells.get(key).add(block);
+  block._solidCellKey = key;
+}
+
+function removeFromSolidIndex(block) {
+  if (!block?._solidCellKey) return;
+  const cell = solidBlockCells.get(block._solidCellKey);
+  if (cell) {
+    cell.delete(block);
+    if (cell.size === 0) solidBlockCells.delete(block._solidCellKey);
+  }
+  block._solidCellKey = null;
+}
+
+function blocksNear(index, x, z, radius) {
+  const found = [];
+  const seen = new Set();
+  const minX = Math.floor(x - radius - 1);
+  const maxX = Math.floor(x + radius + 1);
+  const minZ = Math.floor(z - radius - 1);
+  const maxZ = Math.floor(z + radius + 1);
+  for (let cx = minX; cx <= maxX; cx++) {
+    for (let cz = minZ; cz <= maxZ; cz++) {
+      const cell = index.get(`${cx},${cz}`);
+      if (!cell) continue;
+      for (const block of cell) {
+        if (seen.has(block.id)) continue;
+        seen.add(block.id);
+        found.push(block);
+      }
+    }
+  }
+  return found;
+}
+
+function playerRadius(size) {
+  return 0.2 + Math.sqrt(size) * 0.17;
+}
+
+function playerHeight(size) {
+  return Math.max(1.2, Math.pow(size, 0.45) * 2.45 * PLAYER_VISUAL_BASE_SCALE);
+}
+
+function playerScale(size) {
+  return Math.max(0.3, Math.pow(size, 0.45) * PLAYER_VISUAL_BASE_SCALE);
+}
+
+function moveSpeed(size, running) {
+  const base = running ? 46 : 30;
+  const floor = running ? 18 : 12;
+  const decay = 1 + (Math.sqrt(Math.max(1, size)) - 1) * 0.16;
+  return clamp(base / decay, floor, base);
+}
+
+function verticalOverlapsPlayer(size, footY, block) {
+  const blockBottom = block.y - block.size / 2;
+  const blockTop = block.y + block.size / 2;
+  const headY = footY + playerHeight(size);
+  return blockTop > footY + GROUND_EPSILON && blockBottom < headY - GROUND_EPSILON;
+}
+
+function collidesWithSolid(size, y, x, z) {
+  const radius = playerRadius(size);
+  const bodyRadius = radius + 0.5;
+  for (const block of blocksNear(solidBlockCells, x, z, bodyRadius)) {
+    if (!block.active || !verticalOverlapsPlayer(size, y, block)) continue;
+    if (Math.abs(x - block.x) < bodyRadius && Math.abs(z - block.z) < bodyRadius) return true;
+  }
+  return false;
+}
+
+function supportHeightAt(size, y, x, z) {
+  const radius = playerRadius(size);
+  let support = 0;
+  for (const block of blocksNear(solidBlockCells, x, z, radius + 0.5)) {
+    if (!block.active) continue;
+    const top = block.y + block.size / 2;
+    if (top > y + STEP_TOLERANCE) continue;
+    if (Math.abs(x - block.x) <= radius + 0.5 && Math.abs(z - block.z) <= radius + 0.5) {
+      support = Math.max(support, top);
+    }
+  }
+  return support;
 }
 
 function rebuildArena(size) {
@@ -240,9 +361,16 @@ function createPlayerMesh(player) {
   scene.add(label);
   return {
     group,
+    body,
+    legL,
+    legR,
+    armL,
+    armR,
     shadow,
     label,
     current: { x: player.x, y: player.y || 0, z: player.z, yaw: player.yaw, size: player.size },
+    previous: { x: player.x, y: player.y || 0, z: player.z },
+    walkPhase: 0,
     target: player,
   };
 }
@@ -267,6 +395,25 @@ function removePlayer(id) {
 }
 
 function createBlock(block) {
+  if (blocks.has(block.id)) {
+    const existing = blocks.get(block.id);
+    const blockData = existing.userData.block;
+    removeFromSolidIndex(blockData);
+    Object.assign(blockData, {
+      id: block.id,
+      x: block.x,
+      y: block.y,
+      z: block.z,
+      kind: block.kind,
+      size: block.size || 1,
+      active: block.active,
+    });
+    existing.position.set(block.x, block.y, block.z);
+    existing.visible = block.active;
+    existing.userData.kind = block.kind;
+    addToSolidIndex(blockData);
+    return;
+  }
   const blockMat = block.kind === "window" ? windowMaterial : material(block.color || "#aa604b");
   const mesh = new THREE.Mesh(blockGeometry, blockMat);
   mesh.position.set(block.x, block.y, block.z);
@@ -275,17 +422,32 @@ function createBlock(block) {
   mesh.visible = block.active;
   mesh.userData.kind = block.kind;
   mesh.userData.baseY = block.y;
+  mesh.userData.block = {
+    id: block.id,
+    x: block.x,
+    y: block.y,
+    z: block.z,
+    kind: block.kind,
+    size: block.size || 1,
+    active: block.active,
+    _solidCellKey: null,
+  };
   scene.add(mesh);
   blocks.set(block.id, mesh);
+  addToSolidIndex(mesh.userData.block);
 }
 
 function setBlockActive(id, active) {
   const mesh = blocks.get(id);
   if (!mesh) return;
+  const block = mesh.userData.block;
+  removeFromSolidIndex(block);
+  block.active = active;
   mesh.visible = active;
   if (active) {
     mesh.scale.setScalar(0.01);
     mesh.userData.pop = 0;
+    addToSolidIndex(block);
   }
 }
 
@@ -294,7 +456,19 @@ function handleSnapshot(snapshot) {
   for (const id of [...players.keys()]) {
     if (!snapshot.players.some((p) => p.id === id)) removePlayer(id);
   }
+  const self = snapshot.players.find((p) => p.id === selfId);
+  if (self) {
+    localSize = self.size;
+    if (!localReady) seedLocalPosition(self);
+  }
   renderHud(snapshot);
+}
+
+function seedLocalPosition(player) {
+  localPos = { x: player.x, y: player.y || 0, z: player.z };
+  localVy = 0;
+  yaw = Number.isFinite(player.yaw) ? player.yaw : yaw;
+  localReady = true;
 }
 
 function renderHud(snapshot) {
@@ -329,16 +503,95 @@ function escapeHtml(value) {
 }
 
 function sendInput() {
-  if (!joined) return;
-  const forward = (keys.has("KeyW") ? 1 : 0) + (keys.has("KeyS") ? -1 : 0);
-  const strafe = (keys.has("KeyA") ? 1 : 0) + (keys.has("KeyD") ? -1 : 0);
+  if (!joined || !localReady) return;
   socket.emit("input", {
-    forward,
-    strafe,
+    x: localPos.x,
+    y: localPos.y,
+    z: localPos.z,
     yaw,
-    run: keys.has("ShiftLeft") || keys.has("ShiftRight"),
+    vy: localVy,
+    run: isSprintingNow(),
     jump: keys.has("Space"),
   });
+}
+
+function inputAxes() {
+  return {
+    forward: (keys.has("KeyW") ? 1 : 0) + (keys.has("KeyS") ? -1 : 0),
+    strafe: (keys.has("KeyA") ? 1 : 0) + (keys.has("KeyD") ? -1 : 0),
+  };
+}
+
+function isSprintingNow() {
+  const axes = inputAxes();
+  const moving = axes.forward !== 0 || axes.strafe !== 0;
+  return joined && moving && (keys.has("ShiftLeft") || keys.has("ShiftRight")) && !sprintLocked && stamina > 0;
+}
+
+function updateStamina(dt, moving) {
+  const wantsSprint = moving && (keys.has("ShiftLeft") || keys.has("ShiftRight"));
+  if (sprintLocked && stamina >= SPRINT_MIN_CHARGE_TO_START) sprintLocked = false;
+  const sprinting = wantsSprint && !sprintLocked && stamina > 0;
+
+  if (sprinting) {
+    stamina = Math.max(0, stamina - SPRINT_DRAIN_PER_SECOND * dt);
+    if (stamina <= 0) sprintLocked = true;
+  } else {
+    stamina = Math.min(1, stamina + SPRINT_RECHARGE_PER_SECOND * dt);
+    if (sprintLocked && stamina >= SPRINT_MIN_CHARGE_TO_START) sprintLocked = false;
+  }
+
+  updateStaminaHud();
+  return sprinting;
+}
+
+function updateStaminaHud() {
+  if (staminaFill) staminaFill.style.width = `${Math.round(stamina * 100)}%`;
+  if (staminaBar) staminaBar.classList.toggle("stamina-locked", sprintLocked);
+}
+
+function integrateLocalPlayer(dt) {
+  if (!joined || !localReady) return;
+  let { forward, strafe } = inputAxes();
+  const len = Math.hypot(forward, strafe);
+  if (len > 1) {
+    forward /= len;
+    strafe /= len;
+  }
+  const moving = len > 0;
+  const sprinting = updateStamina(dt, moving);
+  const speed = moveSpeed(localSize, sprinting);
+  const sin = Math.sin(yaw);
+  const cos = Math.cos(yaw);
+  const dx = (sin * forward + cos * strafe) * speed * dt;
+  const dz = (cos * forward - sin * strafe) * speed * dt;
+  const radius = playerRadius(localSize);
+  const half = worldSize / 2;
+  const nextX = clamp(localPos.x + dx, -half + radius, half - radius);
+  const nextZ = clamp(localPos.z + dz, -half + radius, half - radius);
+
+  if (!collidesWithSolid(localSize, localPos.y, nextX, localPos.z)) localPos.x = nextX;
+  if (!collidesWithSolid(localSize, localPos.y, localPos.x, nextZ)) localPos.z = nextZ;
+
+  const supportBefore = supportHeightAt(localSize, localPos.y, localPos.x, localPos.z);
+  const grounded = localPos.y <= supportBefore + GROUND_EPSILON && localVy <= 0;
+  if (keys.has("Space") && grounded) {
+    localPos.y = supportBefore;
+    localVy = JUMP_IMPULSE;
+  }
+
+  localVy -= GRAVITY * dt;
+  localPos.y += localVy * dt;
+
+  const supportAfter = supportHeightAt(localSize, localPos.y, localPos.x, localPos.z);
+  if (localPos.y <= supportAfter && localVy <= 0) {
+    localPos.y = supportAfter;
+    localVy = 0;
+  }
+  if (localPos.y < 0) {
+    localPos.y = 0;
+    localVy = 0;
+  }
 }
 
 function updatePauseUi() {
@@ -383,6 +636,7 @@ async function refreshLobbyStatus() {
 }
 
 function startLobbyStatusPolling() {
+  if (lobbyStatusTimer) return;
   refreshLobbyStatus();
   lobbyStatusTimer = window.setInterval(refreshLobbyStatus, 4000);
 }
@@ -396,6 +650,12 @@ function stopLobbyStatusPolling() {
 playButton.addEventListener("click", () => {
   if (joined) return;
   joined = true;
+  localReady = false;
+  localVy = 0;
+  stamina = 1;
+  sprintLocked = false;
+  keys.clear();
+  updateStaminaHud();
   stopLobbyStatusPolling();
   startPanel.classList.add("hidden");
   hud.classList.remove("hidden");
@@ -410,7 +670,23 @@ resumeButton?.addEventListener("click", () => {
 });
 
 exitLobbyButton?.addEventListener("click", () => {
-  window.location.href = lobbyUrl;
+  if (!joined) return;
+  socket.emit("leaveGame");
+  joined = false;
+  selfId = null;
+  localReady = false;
+  localVy = 0;
+  stamina = 1;
+  sprintLocked = false;
+  keys.clear();
+  document.exitPointerLock?.();
+  hud.classList.add("hidden");
+  pauseMenu?.classList.add("hidden");
+  escHint?.classList.add("hidden");
+  eatOverlay.classList.add("hidden");
+  startPanel.classList.remove("hidden");
+  updateStaminaHud();
+  startLobbyStatusPolling();
 });
 
 document.addEventListener("keydown", (event) => {
@@ -461,6 +737,15 @@ socket.on("playerConsumed", ({ victimId }) => {
   const entry = players.get(victimId);
   if (entry) entry.group.position.y = 0.2;
 });
+socket.on("playerReset", (position) => {
+  localPos = {
+    x: Number(position.x) || 0,
+    y: Number(position.y) || 0,
+    z: Number(position.z) || 0,
+  };
+  localVy = 0;
+  localReady = true;
+});
 socket.on("walletUpdate", (coins) => {
   walletCoins = coins;
 });
@@ -469,16 +754,31 @@ setInterval(sendInput, 1000 / 30);
 
 function animate() {
   requestAnimationFrame(animate);
+  const now = performance.now();
+  const dt = Math.min(0.05, Math.max(0.001, (now - lastFrameTime) / 1000));
+  lastFrameTime = now;
+  integrateLocalPlayer(dt);
+
   const self = players.get(selfId);
 
   for (const [id, entry] of players) {
     const target = entry.target;
-    entry.current.x += (target.x - entry.current.x) * 0.35;
-    entry.current.y += ((target.y || 0) - entry.current.y) * 0.35;
-    entry.current.z += (target.z - entry.current.z) * 0.35;
-    entry.current.yaw += normalizeAngle(target.yaw - entry.current.yaw) * 0.35;
+    entry.previous.x = entry.current.x;
+    entry.previous.y = entry.current.y;
+    entry.previous.z = entry.current.z;
+    if (id === selfId && localReady) {
+      entry.current.x = localPos.x;
+      entry.current.y = localPos.y;
+      entry.current.z = localPos.z;
+      entry.current.yaw = yaw;
+    } else {
+      entry.current.x += (target.x - entry.current.x) * 0.35;
+      entry.current.y += ((target.y || 0) - entry.current.y) * 0.35;
+      entry.current.z += (target.z - entry.current.z) * 0.35;
+      entry.current.yaw += normalizeAngle(target.yaw - entry.current.yaw) * 0.35;
+    }
     entry.current.size += (target.size - entry.current.size) * 0.18;
-    const scale = Math.max(0.45, Math.pow(entry.current.size, 0.45));
+    const scale = playerScale(entry.current.size);
     entry.group.position.set(entry.current.x, entry.current.y, entry.current.z);
     entry.group.rotation.y = entry.current.yaw;
     entry.group.scale.setScalar(scale);
@@ -487,6 +787,7 @@ function animate() {
     entry.label.position.set(entry.current.x, entry.current.y + scale * 2.45 + 0.55, entry.current.z);
     entry.label.lookAt(camera.position);
     if (id === selfId) entry.shadow.material.opacity = 0.32;
+    animateWalk(entry, dt);
   }
 
   for (const mesh of blocks.values()) {
@@ -499,8 +800,9 @@ function animate() {
   if (self) {
     const pos = self.group.position;
     const size = Math.max(1, self.current.size);
-    const distance = 5 + Math.sqrt(size) * 2.4;
-    const eyeHeight = 1.3 + Math.sqrt(size) * 1.25;
+    const scale = playerScale(size);
+    const distance = 4.1 + Math.sqrt(size) * 1.95;
+    const eyeHeight = 0.95 + scale * 2.05;
     const elev = pitch;
     const horiz = distance * Math.cos(elev);
     const vert = distance * Math.sin(elev);
@@ -543,6 +845,25 @@ function resolveCameraOcclusion(eye, desiredCamera, cameraDistance, playerPos) {
   if (hits.length === 0) return desiredCamera;
   const clampedDistance = Math.max(1.2, hits[0].distance - 0.4);
   return eye.clone().addScaledVector(cameraRayDirection, clampedDistance);
+}
+
+function animateWalk(entry, dt) {
+  const dx = entry.current.x - entry.previous.x;
+  const dz = entry.current.z - entry.previous.z;
+  const speed = Math.hypot(dx, dz) / Math.max(dt, 0.001);
+  const amount = clamp(speed / 18, 0, 1);
+  if (amount > 0.02) entry.walkPhase += speed * dt * 0.72;
+
+  const swing = Math.sin(entry.walkPhase) * 0.72 * amount;
+  const oppositeSwing = Math.sin(entry.walkPhase + Math.PI) * 0.72 * amount;
+  const bob = Math.abs(Math.sin(entry.walkPhase * 2)) * 0.055 * amount;
+  const settle = 1 - Math.exp(-18 * dt);
+
+  entry.legL.rotation.x += (swing - entry.legL.rotation.x) * settle;
+  entry.legR.rotation.x += (oppositeSwing - entry.legR.rotation.x) * settle;
+  entry.armL.rotation.x += (oppositeSwing * 0.72 - entry.armL.rotation.x) * settle;
+  entry.armR.rotation.x += (swing * 0.72 - entry.armR.rotation.x) * settle;
+  entry.body.position.y += (1.05 + bob - entry.body.position.y) * settle;
 }
 
 function normalizeAngle(angle) {

@@ -16,11 +16,9 @@ const BLOCK_REGEN_MS = 25000;
 const PLAYER_START_SIZE = 1;
 const MIN_PLAYER_SIZE = 0.75;
 const SHADOW_EAT_SECONDS = 3;
-const GRAVITY = 22;
-const JUMP_IMPULSE = 11.8;
 const FLOOR_SPACING = 10;
-const GROUND_EPSILON = 0.08;
-const STEP_TOLERANCE = 0.34;
+const PLAYER_VISUAL_BASE_SCALE = 0.55;
+const MAX_CLIENT_POSITION_STEP = 12;
 const GAME_ID = "eat-to-grow";
 
 // greglab-games shared cross-game profile (null when PROFILE_API_URL/KEY unset).
@@ -43,7 +41,6 @@ app.get("/api/status", (_req, res) => {
 const players = new Map();
 const blocks = new Map();
 const activeBlockCells = new Map();
-const solidBlockCells = new Map();
 let nextBlockId = 1;
 let snapshotAccumulator = 0;
 
@@ -77,30 +74,19 @@ function spawnAtEdge() {
 }
 
 function playerRadius(size) {
-  return 0.45 + Math.sqrt(size) * 0.22;
+  return 0.2 + Math.sqrt(size) * 0.17;
 }
 
 function playerHeight(size) {
-  return Math.max(1.6, Math.pow(size, 0.45) * 2.4);
+  return Math.max(1.2, Math.pow(size, 0.45) * 2.45 * PLAYER_VISUAL_BASE_SCALE);
 }
 
 function shadowRadius(size) {
   return playerRadius(size) + 0.9 + size * 0.08;
 }
 
-function moveSpeed(size, running) {
-  const base = running ? 46 : 30;
-  const floor = running ? 18 : 12;
-  const decay = 1 + (Math.sqrt(Math.max(1, size)) - 1) * 0.16;
-  return clamp(base / decay, floor, base);
-}
-
 function cellKey(x, z) {
   return `${Math.floor(x)},${Math.floor(z)}`;
-}
-
-function isSolidBlock(block) {
-  return block.kind === "building" || block.kind === "window";
 }
 
 function addToCellIndex(index, block) {
@@ -121,14 +107,11 @@ function removeFromCellIndex(index, key, block) {
 function indexActiveBlock(block) {
   if (!block.active) return;
   block._activeCellKey = addToCellIndex(activeBlockCells, block);
-  if (isSolidBlock(block)) block._solidCellKey = addToCellIndex(solidBlockCells, block);
 }
 
 function unindexActiveBlock(block) {
   removeFromCellIndex(activeBlockCells, block._activeCellKey, block);
-  removeFromCellIndex(solidBlockCells, block._solidCellKey, block);
   block._activeCellKey = null;
-  block._solidCellKey = null;
 }
 
 function blocksNear(index, x, z, radius) {
@@ -303,7 +286,7 @@ function makePlayer(socket, name, hubProfile) {
     yaw: 0,
     size: PLAYER_START_SIZE,
     color: `hsl(${Math.floor(Math.random() * 360)} 72% 56%)`,
-    input: { forward: 0, strafe: 0, yaw: 0, run: false, jump: false },
+    input: { yaw: 0, run: false, jump: false },
     blocksEaten: 0,
     unreportedBlocks: 0,
     playersEaten: 0,
@@ -373,83 +356,6 @@ function consumeBlock(player, block) {
   }
 }
 
-function verticalOverlapsPlayer(player, block, footY = player.y) {
-  const blockBottom = block.y - block.size / 2;
-  const blockTop = block.y + block.size / 2;
-  const headY = footY + playerHeight(player.size);
-  return blockTop > footY + GROUND_EPSILON && blockBottom < headY - GROUND_EPSILON;
-}
-
-function collidesWithSolid(player, x, z) {
-  const radius = playerRadius(player.size);
-  const bodyRadius = radius + 0.5;
-  for (const block of blocksNear(solidBlockCells, x, z, bodyRadius)) {
-    if (!block.active || !verticalOverlapsPlayer(player, block)) continue;
-    if (Math.abs(x - block.x) < bodyRadius && Math.abs(z - block.z) < bodyRadius) return true;
-  }
-  return false;
-}
-
-function supportHeightAt(player, x, z) {
-  const radius = playerRadius(player.size);
-  let support = 0;
-  for (const block of blocksNear(solidBlockCells, x, z, radius + 0.5)) {
-    if (!block.active) continue;
-    const top = block.y + block.size / 2;
-    if (top > player.y + STEP_TOLERANCE) continue;
-    if (Math.abs(x - block.x) <= radius + 0.5 && Math.abs(z - block.z) <= radius + 0.5) {
-      support = Math.max(support, top);
-    }
-  }
-  return support;
-}
-
-function updateVertical(player) {
-  const supportBefore = supportHeightAt(player, player.x, player.z);
-  const grounded = player.y <= supportBefore + GROUND_EPSILON && player.vy <= 0;
-  if (player.input.jump && grounded) {
-    player.y = supportBefore;
-    player.vy = JUMP_IMPULSE;
-  }
-
-  player.vy -= GRAVITY * DT;
-  player.y += player.vy * DT;
-
-  const supportAfter = supportHeightAt(player, player.x, player.z);
-  if (player.y <= supportAfter && player.vy <= 0) {
-    player.y = supportAfter;
-    player.vy = 0;
-  }
-  if (player.y < 0) {
-    player.y = 0;
-    player.vy = 0;
-  }
-}
-
-function updateMovement(player) {
-  const input = player.input;
-  player.yaw = Number.isFinite(input.yaw) ? input.yaw : player.yaw;
-  let forward = clamp(input.forward || 0, -1, 1);
-  let strafe = clamp(input.strafe || 0, -1, 1);
-  const len = Math.hypot(forward, strafe);
-  if (len > 1) {
-    forward /= len;
-    strafe /= len;
-  }
-
-  const speed = moveSpeed(player.size, input.run);
-  const sin = Math.sin(player.yaw);
-  const cos = Math.cos(player.yaw);
-  const dx = (sin * forward + cos * strafe) * speed * DT;
-  const dz = (cos * forward - sin * strafe) * speed * DT;
-  const radius = playerRadius(player.size);
-  const nextX = clamp(player.x + dx, -HALF_WORLD + radius, HALF_WORLD - radius);
-  const nextZ = clamp(player.z + dz, -HALF_WORLD + radius, HALF_WORLD - radius);
-  if (!collidesWithSolid(player, nextX, player.z)) player.x = nextX;
-  if (!collidesWithSolid(player, player.x, nextZ)) player.z = nextZ;
-  updateVertical(player);
-}
-
 function updateBlockEating(player) {
   const radius = playerRadius(player.size);
   const reach = radius + 1.15;
@@ -476,6 +382,7 @@ function respawnPlayer(player) {
   player.eatenBy = null;
   player.eatCountdown = null;
   player.shadowContact.clear();
+  io.to(player.id).emit("playerReset", { x: player.x, y: player.y, z: player.z });
 }
 
 function updatePlayerEating() {
@@ -534,7 +441,6 @@ function updatePlayerEating() {
 function tick() {
   const now = Date.now();
   for (const player of players.values()) {
-    updateMovement(player);
     updateBlockEating(player);
     if (now >= player.nextPeriodicReportAt) {
       player.nextPeriodicReportAt = now + 60000;
@@ -556,6 +462,53 @@ function tick() {
     snapshotAccumulator = 0;
     broadcastSnapshot();
   }
+}
+
+function applyClientPosition(player, input) {
+  const radius = playerRadius(player.size);
+  let x = Number(input.x);
+  let y = Number(input.y);
+  let z = Number(input.z);
+  const yaw = Number(input.yaw);
+  const vy = Number(input.vy);
+
+  if (!Number.isFinite(x)) x = player.x;
+  if (!Number.isFinite(y)) y = player.y;
+  if (!Number.isFinite(z)) z = player.z;
+
+  x = clamp(x, -HALF_WORLD + radius, HALF_WORLD - radius);
+  y = Math.max(0, y);
+  z = clamp(z, -HALF_WORLD + radius, HALF_WORLD - radius);
+
+  const dx = x - player.x;
+  const dy = y - player.y;
+  const dz = z - player.z;
+  const distance = Math.hypot(dx, dy, dz);
+  if (distance > MAX_CLIENT_POSITION_STEP) {
+    const scale = MAX_CLIENT_POSITION_STEP / distance;
+    x = player.x + dx * scale;
+    y = player.y + dy * scale;
+    z = player.z + dz * scale;
+  }
+
+  player.x = x;
+  player.y = y;
+  player.z = z;
+  player.yaw = Number.isFinite(yaw) ? yaw : player.yaw;
+  player.vy = Number.isFinite(vy) ? vy : player.vy;
+  player.input = {
+    yaw: player.yaw,
+    run: Boolean(input.run),
+    jump: Boolean(input.jump),
+  };
+}
+
+function removePlayer(socket, reason) {
+  const player = players.get(socket.id);
+  if (!player) return;
+  maybeReportProgress(player, reason);
+  players.delete(socket.id);
+  io.emit("playerLeft", socket.id);
 }
 
 io.on("connection", (socket) => {
@@ -584,20 +537,15 @@ io.on("connection", (socket) => {
   socket.on("input", (input = {}) => {
     const player = players.get(socket.id);
     if (!player) return;
-    player.input = {
-      forward: Number(input.forward) || 0,
-      strafe: Number(input.strafe) || 0,
-      yaw: Number(input.yaw) || 0,
-      run: Boolean(input.run),
-      jump: Boolean(input.jump),
-    };
+    applyClientPosition(player, input);
+  });
+
+  socket.on("leaveGame", () => {
+    removePlayer(socket, "leave game");
   });
 
   socket.on("disconnect", () => {
-    const player = players.get(socket.id);
-    if (player) maybeReportProgress(player, "disconnect");
-    players.delete(socket.id);
-    io.emit("playerLeft", socket.id);
+    removePlayer(socket, "disconnect");
   });
 });
 
