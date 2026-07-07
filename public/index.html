@@ -18,10 +18,11 @@
 
     <div id="start" class="start-panel">
       <h1>Eat To Grow</h1>
-      <label>
-        Name
-        <input id="nameInput" type="text" maxlength="18" autocomplete="nickname" />
-      </label>
+      <p class="player-name-line">
+        Playing as <strong id="playerNameText">Guest</strong>
+        <a href="https://games.greglab.net">(change at Hub)</a>
+      </p>
+      <input type="hidden" id="nameInput" />
       <button id="playButton" type="button">Play</button>
       <a id="hubLinkStart" href="https://games.greglab.net">Back to Games Hub</a>
     </div>

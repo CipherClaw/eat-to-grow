@@ -7,6 +7,7 @@ const canvas = document.getElementById("game");
 const startPanel = document.getElementById("start");
 const playButton = document.getElementById("playButton");
 const nameInput = document.getElementById("nameInput");
+const playerNameText = document.getElementById("playerNameText");
 const hud = document.getElementById("hud");
 const sizeReadout = document.getElementById("sizeReadout");
 const walletReadout = document.getElementById("walletReadout");
@@ -20,7 +21,8 @@ const identity = window.GreglabGames?.getIdentity?.() || { token: null, name: nu
 const lobbyUrl = window.GreglabGames?.lobbyUrl?.() || "https://games.greglab.net";
 hubLinkStart.href = lobbyUrl;
 hubLinkHud.href = lobbyUrl;
-if (identity.name) nameInput.value = identity.name;
+nameInput.value = identity.name || "";
+playerNameText.textContent = identity.name || "Guest";
 
 let selfId = null;
 let worldSize = 180;
@@ -302,7 +304,7 @@ playButton.addEventListener("click", () => {
   joined = true;
   startPanel.classList.add("hidden");
   hud.classList.remove("hidden");
-  socket.emit("hello", { glToken: identity.token, name: nameInput.value || identity.name || "" });
+  socket.emit("hello", { glToken: identity.token, name: identity.name || "" });
   canvas.requestPointerLock?.();
 });
 
