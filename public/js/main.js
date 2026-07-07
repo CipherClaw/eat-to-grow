@@ -35,7 +35,7 @@ const players = new Map();
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#70c8ee");
-scene.fog = new THREE.Fog("#70c8ee", 100, 230);
+scene.fog = new THREE.Fog("#70c8ee", 140, 340);
 
 const camera = new THREE.PerspectiveCamera(65, window.innerWidth / window.innerHeight, 0.1, 500);
 const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -48,11 +48,11 @@ sun.position.set(45, 80, 35);
 sun.castShadow = true;
 sun.shadow.mapSize.set(2048, 2048);
 sun.shadow.camera.near = 1;
-sun.shadow.camera.far = 180;
-sun.shadow.camera.left = -110;
-sun.shadow.camera.right = 110;
-sun.shadow.camera.top = 110;
-sun.shadow.camera.bottom = -110;
+sun.shadow.camera.far = 260;
+sun.shadow.camera.left = -155;
+sun.shadow.camera.right = 155;
+sun.shadow.camera.top = 155;
+sun.shadow.camera.bottom = -155;
 scene.add(sun);
 scene.add(new THREE.HemisphereLight("#bfeaff", "#596345", 1.7));
 
@@ -104,7 +104,8 @@ function rebuildArena(size) {
 
   roadLines.clear();
   const lineMat = material("#f4f6f8");
-  for (let i = -70; i <= 70; i += 20) {
+  const roadExtent = Math.floor(half / 20) * 20 - 10;
+  for (let i = -roadExtent; i <= roadExtent; i += 20) {
     const lineA = new THREE.Mesh(new THREE.BoxGeometry(10, 0.04, 0.7), lineMat);
     lineA.position.set(i, 0.03, 0);
     roadLines.add(lineA);
@@ -190,13 +191,19 @@ function createPlayerMesh(player) {
   );
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.04;
-  group.add(shadow);
 
   const label = makeNameSprite(player.name);
   group.add(label);
 
   scene.add(group);
-  return { group, shadow, label, current: { x: player.x, z: player.z, yaw: player.yaw, size: player.size }, target: player };
+  scene.add(shadow);
+  return {
+    group,
+    shadow,
+    label,
+    current: { x: player.x, y: player.y || 0, z: player.z, yaw: player.yaw, size: player.size },
+    target: player,
+  };
 }
 
 function upsertPlayer(player) {
@@ -213,6 +220,7 @@ function removePlayer(id) {
   const entry = players.get(id);
   if (!entry) return;
   scene.remove(entry.group);
+  scene.remove(entry.shadow);
   players.delete(id);
 }
 
@@ -279,12 +287,13 @@ function escapeHtml(value) {
 function sendInput() {
   if (!joined) return;
   const forward = (keys.has("KeyW") ? 1 : 0) + (keys.has("KeyS") ? -1 : 0);
-  const strafe = (keys.has("KeyD") ? 1 : 0) + (keys.has("KeyA") ? -1 : 0);
+  const strafe = (keys.has("KeyA") ? 1 : 0) + (keys.has("KeyD") ? -1 : 0);
   socket.emit("input", {
     forward,
     strafe,
     yaw,
     run: keys.has("ShiftLeft") || keys.has("ShiftRight"),
+    jump: keys.has("Space"),
   });
 }
 
@@ -298,6 +307,7 @@ playButton.addEventListener("click", () => {
 });
 
 document.addEventListener("keydown", (event) => {
+  if (event.code === "Space") event.preventDefault();
   keys.add(event.code);
   if (event.code === "Escape") document.exitPointerLock?.();
 });
@@ -309,7 +319,7 @@ document.addEventListener("keyup", (event) => {
 document.addEventListener("mousemove", (event) => {
   if (document.pointerLockElement !== canvas) return;
   yaw -= event.movementX * 0.0022;
-  pitch = Math.max(-0.85, Math.min(0.25, pitch - event.movementY * 0.0014));
+  pitch = Math.max(-1.4, Math.min(0.6, pitch - event.movementY * 0.0014));
 });
 
 canvas.addEventListener("click", () => {
@@ -355,14 +365,16 @@ function animate() {
   for (const [id, entry] of players) {
     const target = entry.target;
     entry.current.x += (target.x - entry.current.x) * 0.28;
+    entry.current.y += ((target.y || 0) - entry.current.y) * 0.28;
     entry.current.z += (target.z - entry.current.z) * 0.28;
     entry.current.yaw += normalizeAngle(target.yaw - entry.current.yaw) * 0.28;
     entry.current.size += (target.size - entry.current.size) * 0.18;
     const scale = Math.max(0.45, Math.pow(entry.current.size, 0.45));
-    entry.group.position.set(entry.current.x, 0, entry.current.z);
+    entry.group.position.set(entry.current.x, entry.current.y, entry.current.z);
     entry.group.rotation.y = entry.current.yaw;
     entry.group.scale.setScalar(scale);
-    entry.shadow.scale.setScalar((target.shadowRadius || 1) / scale);
+    entry.shadow.position.set(entry.current.x, 0.04, entry.current.z);
+    entry.shadow.scale.setScalar(target.shadowRadius || 1);
     entry.label.position.set(0, 2.85, 0);
     entry.label.lookAt(camera.position);
     if (id === selfId) entry.shadow.material.opacity = 0.32;
@@ -380,13 +392,14 @@ function animate() {
     const size = Math.max(1, self.current.size);
     const distance = 8 + Math.sqrt(size) * 4.4;
     const height = 4 + Math.sqrt(size) * 2.7;
+    const lookHeight = 1.2 + Math.sqrt(size) * 0.75 + Math.sin(pitch) * distance * 0.75;
     const cameraTarget = new THREE.Vector3(
       pos.x - Math.sin(yaw) * distance,
-      height - Math.sin(pitch) * 5,
+      pos.y + height - Math.sin(pitch) * 3.2,
       pos.z - Math.cos(yaw) * distance
     );
     camera.position.lerp(cameraTarget, 0.18);
-    camera.lookAt(pos.x, 1.5 + Math.sqrt(size), pos.z);
+    camera.lookAt(pos.x, pos.y + lookHeight, pos.z);
   } else {
     camera.position.set(25, 26, 35);
     camera.lookAt(0, 0, 0);

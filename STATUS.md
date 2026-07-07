@@ -3,6 +3,8 @@
 - First playable multiplayer prototype implemented.
 - Server is authoritative for movement, size, block consumption, block respawn, shadow-based player eating, and hub rewards.
 - Static Three.js client renders a blocky arena, voxel buildings, props, third-person player camera, HUD, leaderboard, wallet readout, and player-eating countdown overlay.
+- Server-authoritative movement now includes corrected A/D strafing, Space jump physics with gravity, solid building collision, reliable contact eating, and standable multi-floor voxel buildings.
+- The arena is expanded to 260 units with taller buildings, edible floor slabs every 3 units, more props, and client rendering/camera support for player vertical position while shadows stay on the ground.
 - Shared greglab-games profile integration is wired through the copied `profile.js` and `public/greglab-client.js`.
 - GitHub repository: `CipherClaw/eat-to-grow`.
 - Production domain: `https://eattogrow.greglab.net`.
