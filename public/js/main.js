@@ -38,6 +38,9 @@ const keys = new Set();
 const blocks = new Map();
 const players = new Map();
 let lobbyStatusTimer = null;
+const cameraRaycaster = new THREE.Raycaster();
+const cameraRayDirection = new THREE.Vector3();
+const cameraHitCandidates = [];
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color("#70c8ee");
@@ -135,42 +138,65 @@ function makeNameSprite(text) {
   c.width = 512;
   c.height = 128;
   const ctx = c.getContext("2d");
-  ctx.fillStyle = "rgba(9, 16, 28, 0.82)";
-  ctx.fillRect(0, 0, c.width, c.height);
-  ctx.fillStyle = "#e9f4ff";
-  ctx.font = "700 40px system-ui";
-  ctx.textAlign = "center";
-  ctx.fillText(text, c.width / 2, 52);
-  ctx.fillStyle = "#c4d7e7";
-  ctx.font = "700 28px system-ui";
-  ctx.fillText("size: 1.0", c.width / 2, 94);
+  drawNameTag(ctx, c, text, 1);
   const texture = new THREE.CanvasTexture(c);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
-  sprite.scale.set(4.8, 1.2, 1);
+  sprite.scale.set(2.6, 0.65, 1);
   sprite.userData.canvas = c;
   sprite.userData.ctx = ctx;
   sprite.userData.texture = texture;
   sprite.userData.name = text;
+  sprite.userData.size = "1.0";
   return sprite;
 }
 
 function updateNameSprite(sprite, name, size) {
-  if (!sprite || sprite.userData.name === name && sprite.userData.size === size.toFixed(1)) return;
+  if (!sprite || (sprite.userData.name === name && sprite.userData.size === size.toFixed(1))) return;
   const ctx = sprite.userData.ctx;
   const c = sprite.userData.canvas;
-  ctx.clearRect(0, 0, c.width, c.height);
-  ctx.fillStyle = "rgba(9, 16, 28, 0.82)";
-  ctx.fillRect(0, 0, c.width, c.height);
-  ctx.fillStyle = "#e9f4ff";
-  ctx.font = "700 40px system-ui";
-  ctx.textAlign = "center";
-  ctx.fillText(name, c.width / 2, 52);
-  ctx.fillStyle = "#c4d7e7";
-  ctx.font = "700 28px system-ui";
-  ctx.fillText(`size: ${size.toFixed(1)}`, c.width / 2, 94);
+  drawNameTag(ctx, c, name, size);
   sprite.userData.texture.needsUpdate = true;
   sprite.userData.name = name;
   sprite.userData.size = size.toFixed(1);
+}
+
+function drawNameTag(ctx, c, name, size) {
+  const sizeText = `size: ${size.toFixed(1)}`;
+  ctx.clearRect(0, 0, c.width, c.height);
+  ctx.textAlign = "center";
+  ctx.textBaseline = "alphabetic";
+  ctx.font = "700 30px system-ui";
+  const nameWidth = ctx.measureText(name).width;
+  ctx.font = "700 22px system-ui";
+  const sizeWidth = ctx.measureText(sizeText).width;
+  const rectWidth = Math.min(460, Math.max(150, Math.ceil(Math.max(nameWidth, sizeWidth)) + 44));
+  const rectHeight = 74;
+  const rectX = (c.width - rectWidth) / 2;
+  const rectY = 27;
+
+  ctx.fillStyle = "rgba(9, 16, 28, 0.82)";
+  roundedRect(ctx, rectX, rectY, rectWidth, rectHeight, 18);
+  ctx.fill();
+  ctx.fillStyle = "#e9f4ff";
+  ctx.font = "700 30px system-ui";
+  ctx.fillText(name, c.width / 2, 58, rectWidth - 36);
+  ctx.fillStyle = "#c4d7e7";
+  ctx.font = "700 22px system-ui";
+  ctx.fillText(sizeText, c.width / 2, 86, rectWidth - 36);
+}
+
+function roundedRect(ctx, x, y, width, height, radius) {
+  ctx.beginPath();
+  ctx.moveTo(x + radius, y);
+  ctx.lineTo(x + width - radius, y);
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  ctx.lineTo(x + width, y + height - radius);
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  ctx.lineTo(x + radius, y + height);
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  ctx.lineTo(x, y + radius);
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  ctx.closePath();
 }
 
 function createPlayerMesh(player) {
@@ -208,10 +234,10 @@ function createPlayerMesh(player) {
   shadow.position.y = 0.04;
 
   const label = makeNameSprite(player.name);
-  group.add(label);
 
   scene.add(group);
   scene.add(shadow);
+  scene.add(label);
   return {
     group,
     shadow,
@@ -236,6 +262,7 @@ function removePlayer(id) {
   if (!entry) return;
   scene.remove(entry.group);
   scene.remove(entry.shadow);
+  scene.remove(entry.label);
   players.delete(id);
 }
 
@@ -246,6 +273,7 @@ function createBlock(block) {
   mesh.castShadow = true;
   mesh.receiveShadow = true;
   mesh.visible = block.active;
+  mesh.userData.kind = block.kind;
   mesh.userData.baseY = block.y;
   scene.add(mesh);
   blocks.set(block.id, mesh);
@@ -445,10 +473,10 @@ function animate() {
 
   for (const [id, entry] of players) {
     const target = entry.target;
-    entry.current.x += (target.x - entry.current.x) * 0.28;
-    entry.current.y += ((target.y || 0) - entry.current.y) * 0.28;
-    entry.current.z += (target.z - entry.current.z) * 0.28;
-    entry.current.yaw += normalizeAngle(target.yaw - entry.current.yaw) * 0.28;
+    entry.current.x += (target.x - entry.current.x) * 0.35;
+    entry.current.y += ((target.y || 0) - entry.current.y) * 0.35;
+    entry.current.z += (target.z - entry.current.z) * 0.35;
+    entry.current.yaw += normalizeAngle(target.yaw - entry.current.yaw) * 0.35;
     entry.current.size += (target.size - entry.current.size) * 0.18;
     const scale = Math.max(0.45, Math.pow(entry.current.size, 0.45));
     entry.group.position.set(entry.current.x, entry.current.y, entry.current.z);
@@ -456,7 +484,7 @@ function animate() {
     entry.group.scale.setScalar(scale);
     entry.shadow.position.set(entry.current.x, 0.04, entry.current.z);
     entry.shadow.scale.setScalar(target.shadowRadius || 1);
-    entry.label.position.set(0, 2.85, 0);
+    entry.label.position.set(entry.current.x, entry.current.y + scale * 2.45 + 0.55, entry.current.z);
     entry.label.lookAt(camera.position);
     if (id === selfId) entry.shadow.material.opacity = 0.32;
   }
@@ -471,16 +499,18 @@ function animate() {
   if (self) {
     const pos = self.group.position;
     const size = Math.max(1, self.current.size);
-    const distance = 8 + Math.sqrt(size) * 4.4;
-    const eyeHeight = 1.5 + Math.sqrt(size) * 1.5;
+    const distance = 5 + Math.sqrt(size) * 2.4;
+    const eyeHeight = 1.3 + Math.sqrt(size) * 1.25;
     const elev = pitch;
     const horiz = distance * Math.cos(elev);
     const vert = distance * Math.sin(elev);
-    const cameraTarget = new THREE.Vector3(
-      pos.x - Math.sin(yaw) * horiz,
-      Math.max(0.85, pos.y + eyeHeight + vert),
-      pos.z - Math.cos(yaw) * horiz
+    const eye = new THREE.Vector3(pos.x, Math.max(0.85, pos.y + eyeHeight), pos.z);
+    const desiredCamera = new THREE.Vector3(
+      eye.x - Math.sin(yaw) * horiz,
+      Math.max(0.85, eye.y + vert),
+      eye.z - Math.cos(yaw) * horiz
     );
+    const cameraTarget = resolveCameraOcclusion(eye, desiredCamera, distance, pos);
     camera.position.lerp(cameraTarget, 0.18);
     camera.lookAt(pos.x, pos.y + eyeHeight * 0.5, pos.z);
   } else {
@@ -489,6 +519,30 @@ function animate() {
   }
 
   renderer.render(scene, camera);
+}
+
+function resolveCameraOcclusion(eye, desiredCamera, cameraDistance, playerPos) {
+  cameraRayDirection.copy(desiredCamera).sub(eye);
+  const rayLength = cameraRayDirection.length();
+  if (rayLength <= 0.001) return desiredCamera;
+  cameraRayDirection.divideScalar(rayLength);
+  cameraRaycaster.set(eye, cameraRayDirection);
+  cameraRaycaster.near = 0;
+  cameraRaycaster.far = rayLength;
+
+  cameraHitCandidates.length = 0;
+  const maxBlockDistance = cameraDistance + 4;
+  for (const mesh of blocks.values()) {
+    if (!mesh.visible || (mesh.userData.kind !== "building" && mesh.userData.kind !== "window")) continue;
+    if (Math.hypot(mesh.position.x - playerPos.x, mesh.position.z - playerPos.z) > maxBlockDistance) continue;
+    cameraHitCandidates.push(mesh);
+  }
+  for (const wall of wallGroup.children) cameraHitCandidates.push(wall);
+
+  const hits = cameraRaycaster.intersectObjects(cameraHitCandidates, false);
+  if (hits.length === 0) return desiredCamera;
+  const clampedDistance = Math.max(1.2, hits[0].distance - 0.4);
+  return eye.clone().addScaledVector(cameraRayDirection, clampedDistance);
 }
 
 function normalizeAngle(angle) {

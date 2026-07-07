@@ -8,7 +8,7 @@ const socketIO = require("socket.io");
 const PORT = process.env.PORT || 3000;
 const HOST = "0.0.0.0";
 const TICK_RATE = 30;
-const SNAPSHOT_RATE = 10;
+const SNAPSHOT_RATE = 20;
 const DT = 1 / TICK_RATE;
 const WORLD_SIZE = 260;
 const HALF_WORLD = WORLD_SIZE / 2;
@@ -18,7 +18,7 @@ const MIN_PLAYER_SIZE = 0.75;
 const SHADOW_EAT_SECONDS = 3;
 const GRAVITY = 22;
 const JUMP_IMPULSE = 11.8;
-const FLOOR_SPACING = 6;
+const FLOOR_SPACING = 10;
 const GROUND_EPSILON = 0.08;
 const STEP_TOLERANCE = 0.34;
 const GAME_ID = "eat-to-grow";
@@ -89,9 +89,9 @@ function shadowRadius(size) {
 }
 
 function moveSpeed(size, running) {
-  const base = running ? 26 : 18;
-  const floor = running ? 9 : 6;
-  const decay = 1 + (Math.sqrt(Math.max(1, size)) - 1) * 0.25;
+  const base = running ? 46 : 30;
+  const floor = running ? 18 : 12;
+  const decay = 1 + (Math.sqrt(Math.max(1, size)) - 1) * 0.16;
   return clamp(base / decay, floor, base);
 }
 
