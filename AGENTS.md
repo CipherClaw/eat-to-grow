@@ -42,15 +42,20 @@ const hub = require("./profile.js").fromEnv("eat-to-grow");
 
 Guests and missing hub env vars are fully supported. Linked players report games played, blocks eaten, players eaten, best size, and coin awards.
 
-## Deployment
+## Railway
 
-Railway metadata files are present for a later deployment task:
-
-- `railway.json`
-- `nixpacks.toml`
-- `Procfile`
-
-Do not touch Railway or DNS unless the user explicitly asks for deployment.
+- Project: `eat-to-grow` (id `94a7dc54-a84e-420b-9564-af7f7295f204`)
+- Service: `eat-to-grow` (id `a2bb9848-c60e-43c6-9139-a3912ba1f596`)
+- Environment: `production` (id `f25cf729-38b0-47a6-834f-553618bb692e`)
+- Railway URL: https://eat-to-grow-production.up.railway.app
+- Public URL: https://eattogrow.greglab.net
+- Builder: NIXPACKS (`railway.json` start command `npm start`, `nixpacks.toml` present)
+- Deploy convention: deploy to Railway after committed production changes. Use `/srv/codex-work/shared/scripts/railway-with-token.sh up --service eat-to-grow --environment production --detach` from the project dir, then verify deployment status and `/api/status`.
+- DNS: `eattogrow.greglab.net` is a CNAME in Route53 zone `ZUYHF7A0SK9ZQ`
+  pointing to `vfrhdmxn.up.railway.app`. Railway custom domain id
+  `5f65f61b-2109-484f-abff-491e806a1ba3` uses the default target port; TLS
+  ownership validation required a `_railway-verify.eattogrow.greglab.net` TXT
+  record. Do not store the TXT value, Railway token, or `PROFILE_API_KEY` in this file.
 
 ## Durable Notes
 
