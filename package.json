@@ -1,0 +1,26 @@
+{
+  "name": "eat-to-grow",
+  "version": "0.1.0",
+  "description": "Eat To Grow - an .io-style multiplayer eat-and-grow arena",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.x"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js",
+    "test": "node --check server.js && for f in public/js/*.js; do node --check \"$f\"; done"
+  },
+  "keywords": [
+    "game",
+    "multiplayer",
+    "threejs",
+    "socket.io"
+  ],
+  "author": "CipherClaw",
+  "license": "ISC",
+  "dependencies": {
+    "express": "^5.2.1",
+    "socket.io": "^4.8.3"
+  }
+}

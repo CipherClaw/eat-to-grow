@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Eat To Grow</title>
+    <link rel="stylesheet" href="/css/style.css" />
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://unpkg.com/three@0.182.0/build/three.module.js"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <canvas id="game"></canvas>
+
+    <div id="start" class="start-panel">
+      <h1>Eat To Grow</h1>
+      <label>
+        Name
+        <input id="nameInput" type="text" maxlength="18" autocomplete="nickname" />
+      </label>
+      <button id="playButton" type="button">Play</button>
+      <a id="hubLinkStart" href="https://games.greglab.net">Back to Games Hub</a>
+    </div>
+
+    <div id="hud" class="hud hidden">
+      <a id="hubLinkHud" class="hub-link" href="https://games.greglab.net">Back to Games Hub</a>
+      <div class="size-readout" id="sizeReadout">Size: 1.0u</div>
+      <div class="wallet" id="walletReadout"></div>
+      <div class="leaderboard">
+        <div class="leaderboard-title">Leaderboard</div>
+        <ol id="leaderboardList"></ol>
+      </div>
+    </div>
+
+    <div id="eatOverlay" class="eat-overlay hidden">
+      <div>You're being eaten!</div>
+      <strong id="eatCountdown">3</strong>
+    </div>
+
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="/greglab-client.js"></script>
+    <script src="/js/main.js"></script>
+  </body>
+</html>
