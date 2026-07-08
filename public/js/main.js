@@ -46,6 +46,7 @@ let sprintLocked = false;
 const keys = new Set();
 const blocks = new Map();
 const solidBlockCells = new Map();
+const predictedBlockEats = new Map();
 const players = new Map();
 let lobbyStatusTimer = null;
 const cameraRaycaster = new THREE.Raycaster();
@@ -110,6 +111,11 @@ const PLAYER_VISUAL_BASE_SCALE = 0.55;
 const SPRINT_DRAIN_PER_SECOND = 0.34;
 const SPRINT_RECHARGE_PER_SECOND = 0.24;
 const SPRINT_MIN_CHARGE_TO_START = 0.18;
+const BLOCK_EAT_REACH_EXTRA = 1.15;
+const BLOCK_EAT_TOUCH_EXTRA = 0.58;
+const BLOCK_EAT_FOOT_OFFSET = 0.6;
+const BLOCK_EAT_HEAD_EXTRA = 0.2;
+const PREDICTED_EAT_REVERT_MS = 1500;
 
 function material(color) {
   if (!materialCache.has(color)) {
@@ -193,6 +199,73 @@ function verticalOverlapsPlayer(size, footY, block) {
   const blockTop = block.y + block.size / 2;
   const headY = footY + playerHeight(size);
   return blockTop > footY + GROUND_EPSILON && blockBottom < headY - GROUND_EPSILON;
+}
+
+function blockMatchesServerEatBand(size, y, x, z, block) {
+  const radius = playerRadius(size);
+  const reach = radius + BLOCK_EAT_REACH_EXTRA;
+  const footY = y - BLOCK_EAT_FOOT_OFFSET;
+  const headY = y + playerHeight(size) + BLOCK_EAT_HEAD_EXTRA;
+  const blockBottom = block.y - block.size / 2;
+  const blockTop = block.y + block.size / 2;
+  if (blockTop < footY || blockBottom > headY) return false;
+  const d = Math.hypot(x - block.x, z - block.z);
+  const touching = Math.abs(x - block.x) <= radius + BLOCK_EAT_TOUCH_EXTRA && Math.abs(z - block.z) <= radius + BLOCK_EAT_TOUCH_EXTRA;
+  return d <= reach || touching;
+}
+
+function movingIntoBlock(fromX, fromZ, dx, dz, block) {
+  const moveLen = Math.hypot(dx, dz);
+  if (moveLen <= 0.0001) return false;
+  const towardX = block.x - fromX;
+  const towardZ = block.z - fromZ;
+  const centerDot = (towardX * dx + towardZ * dz) / moveLen;
+  const currentDistance = Math.hypot(towardX, towardZ);
+  const nextDistance = Math.hypot(block.x - (fromX + dx), block.z - (fromZ + dz));
+  return centerDot > 0.02 || nextDistance < currentDistance - 0.001;
+}
+
+function canPredictEatBlock(size, y, x, z, dx, dz, block) {
+  if (!block.active || !isSolidBlock(block)) return false;
+  if (!blockMatchesServerEatBand(size, y, x, z, block)) return false;
+  const blockTop = block.y + block.size / 2;
+  if (blockTop <= y + STEP_TOLERANCE) return false;
+  return movingIntoBlock(localPos.x, localPos.z, dx, dz, block);
+}
+
+function markBlockPredictedEaten(block) {
+  removeFromSolidIndex(block);
+  block.active = false;
+  const mesh = blocks.get(block.id);
+  if (mesh) mesh.visible = false;
+  predictedBlockEats.set(block.id, performance.now() + PREDICTED_EAT_REVERT_MS);
+}
+
+function predictLocalBlockEating(dx, dz, x, z) {
+  if (Math.hypot(dx, dz) <= 0.0001) return;
+  const radius = playerRadius(localSize);
+  const reach = radius + BLOCK_EAT_REACH_EXTRA;
+  for (const block of blocksNear(solidBlockCells, x, z, reach)) {
+    if (canPredictEatBlock(localSize, localPos.y, x, z, dx, dz, block)) markBlockPredictedEaten(block);
+  }
+}
+
+function clearPredictedEat(id) {
+  predictedBlockEats.delete(id);
+}
+
+function restoreExpiredPredictedEats(now) {
+  for (const [id, expiresAt] of predictedBlockEats) {
+    if (now < expiresAt) continue;
+    predictedBlockEats.delete(id);
+    const mesh = blocks.get(id);
+    if (!mesh) continue;
+    const block = mesh.userData.block;
+    if (block.active) continue;
+    block.active = true;
+    mesh.visible = true;
+    addToSolidIndex(block);
+  }
 }
 
 function collidesWithSolid(size, y, x, z) {
@@ -396,6 +469,7 @@ function removePlayer(id) {
 
 function createBlock(block) {
   if (blocks.has(block.id)) {
+    clearPredictedEat(block.id);
     const existing = blocks.get(block.id);
     const blockData = existing.userData.block;
     removeFromSolidIndex(blockData);
@@ -440,6 +514,7 @@ function createBlock(block) {
 function setBlockActive(id, active) {
   const mesh = blocks.get(id);
   if (!mesh) return;
+  clearPredictedEat(id);
   const block = mesh.userData.block;
   removeFromSolidIndex(block);
   block.active = active;
@@ -569,6 +644,8 @@ function integrateLocalPlayer(dt) {
   const half = worldSize / 2;
   const nextX = clamp(localPos.x + dx, -half + radius, half - radius);
   const nextZ = clamp(localPos.z + dz, -half + radius, half - radius);
+
+  predictLocalBlockEating(dx, dz, nextX, nextZ);
 
   if (!collidesWithSolid(localSize, localPos.y, nextX, localPos.z)) localPos.x = nextX;
   if (!collidesWithSolid(localSize, localPos.y, localPos.x, nextZ)) localPos.z = nextZ;
@@ -757,6 +834,7 @@ function animate() {
   const now = performance.now();
   const dt = Math.min(0.05, Math.max(0.001, (now - lastFrameTime) / 1000));
   lastFrameTime = now;
+  restoreExpiredPredictedEats(now);
   integrateLocalPlayer(dt);
 
   const self = players.get(selfId);

@@ -1,5 +1,6 @@
 # Status
 
+- 2026-07-08 fixed wall chewing with client-side predictive removal of edible solid building/window blocks using server-matched eat reach, touch, and vertical-band checks, while keeping growth and confirmed consumption server-authoritative.
 - 2026-07-07 pass added client-side prediction, sprint stamina, walking animation, smaller starting scale, and in-game Exit to Lobby behavior.
 - First playable multiplayer prototype implemented.
 - Server is authoritative for movement, size, block consumption, block respawn, shadow-based player eating, and hub rewards.
