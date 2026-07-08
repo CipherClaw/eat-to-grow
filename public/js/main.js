@@ -47,7 +47,7 @@ let lastFrameTime = performance.now();
 let stamina = 1;
 let sprintLocked = false;
 let stuckTimer = 0;
-let stuckJitterPhase = 0;
+let stuckBestPenetration = Infinity;
 
 const keys = new Set();
 const blocks = new Map();
@@ -127,8 +127,9 @@ const NAME_LABEL_BASE_WIDTH = 3.4;
 const NAME_LABEL_BASE_HEIGHT = 0.85;
 const NAME_LABEL_MIN_SCALE = 1.0;
 const NAME_LABEL_MAX_SCALE = 4.5;
-const UNSTUCK_PUSH_SPEED = 7.5;
-const UNSTUCK_HARD_RECOVERY_SECONDS = 0.9;
+const UNSTUCK_NUDGE_SPEED = 2.2;
+const UNSTUCK_HARD_RECOVERY_SECONDS = 2.75;
+const UNSTUCK_PROGRESS_EPSILON = 0.015;
 const UNSTUCK_RECOVERY_MAX_STEP = 11.4;
 const UNSTUCK_OPEN_SCAN_STEP = 0.75;
 const EAT_PARTICLE_COUNT = 36;
@@ -300,32 +301,37 @@ function restoreExpiredPredictedEats(now) {
 }
 
 function collidesWithSolid(size, y, x, z) {
-  const radius = playerRadius(size);
-  const bodyRadius = radius + 0.5;
-  for (const block of blocksNear(solidBlockCells, x, z, bodyRadius)) {
-    if (!block.active || !verticalOverlapsPlayer(size, y, block)) continue;
-    if (Math.abs(x - block.x) < bodyRadius && Math.abs(z - block.z) < bodyRadius) return true;
-  }
-  return false;
+  return solidOverlapInfo(size, y, x, z).penetration > 0;
 }
 
-function nearestOverlappingSolid(size, y, x, z) {
+function solidOverlapInfo(size, y, x, z) {
   const radius = playerRadius(size);
   const bodyRadius = radius + 0.5;
-  let nearest = null;
-  let nearestDistanceSq = Infinity;
+  let best = null;
+  let bestPenetration = 0;
+  let bestPushX = 0;
+  let bestPushZ = 0;
   for (const block of blocksNear(solidBlockCells, x, z, bodyRadius)) {
     if (!block.active || !verticalOverlapsPlayer(size, y, block)) continue;
-    if (Math.abs(x - block.x) >= bodyRadius || Math.abs(z - block.z) >= bodyRadius) continue;
     const dx = x - block.x;
     const dz = z - block.z;
-    const distanceSq = dx * dx + dz * dz;
-    if (distanceSq < nearestDistanceSq) {
-      nearest = block;
-      nearestDistanceSq = distanceSq;
+    const overlapX = bodyRadius - Math.abs(dx);
+    const overlapZ = bodyRadius - Math.abs(dz);
+    if (overlapX <= 0 || overlapZ <= 0) continue;
+    const penetration = Math.min(overlapX, overlapZ);
+    if (penetration > bestPenetration) {
+      best = block;
+      bestPenetration = penetration;
+      if (overlapX <= overlapZ) {
+        bestPushX = dx >= 0 ? 1 : -1;
+        bestPushZ = 0;
+      } else {
+        bestPushX = 0;
+        bestPushZ = dz >= 0 ? 1 : -1;
+      }
     }
   }
-  return nearest;
+  return { block: best, penetration: bestPenetration, pushX: bestPushX, pushZ: bestPushZ };
 }
 
 function supportHeightAt(size, y, x, z) {
@@ -342,42 +348,12 @@ function supportHeightAt(size, y, x, z) {
   return support;
 }
 
-function findRoofRecovery(size, y, x, z) {
-  const radius = playerRadius(size);
-  let best = null;
-  let bestScore = Infinity;
-  for (const block of blocksNear(solidBlockCells, x, z, UNSTUCK_RECOVERY_MAX_STEP)) {
-    if (!block.active) continue;
-    const top = block.y + block.size / 2;
-    if (top < y - 0.05 || top > y + UNSTUCK_RECOVERY_MAX_STEP) continue;
-    const candidates = [
-      [x, z],
-      [block.x, block.z],
-      [block.x + radius + 0.62, block.z],
-      [block.x - radius - 0.62, block.z],
-      [block.x, block.z + radius + 0.62],
-      [block.x, block.z - radius - 0.62],
-    ];
-    for (const [cx, cz] of candidates) {
-      const half = worldSize / 2;
-      if (cx < -half + radius || cx > half - radius || cz < -half + radius || cz > half - radius) continue;
-      if (collidesWithSolid(size, top, cx, cz)) continue;
-      const horizontal = Math.hypot(cx - x, cz - z);
-      const vertical = Math.max(0, top - y);
-      const score = horizontal + vertical * 0.35;
-      if (score < bestScore) {
-        bestScore = score;
-        best = { x: cx, y: top, z: cz };
-      }
-    }
-  }
-  return best;
-}
-
-function findOpenGroundRecovery(size, x, z) {
+function findSameHeightRecovery(size, y, x, z) {
   const radius = playerRadius(size);
   const half = worldSize / 2;
-  if (!collidesWithSolid(size, 0, x, z)) return { x, y: 0, z };
+  const startX = clamp(x, -half + radius, half - radius);
+  const startZ = clamp(z, -half + radius, half - radius);
+  if (!collidesWithSolid(size, y, startX, startZ)) return { x: startX, y, z: startZ };
 
   let best = null;
   let bestDistance = Infinity;
@@ -387,28 +363,37 @@ function findOpenGroundRecovery(size, x, z) {
       const angle = (i / samples) * Math.PI * 2 + r * 0.37;
       const cx = clamp(x + Math.cos(angle) * r, -half + radius, half - radius);
       const cz = clamp(z + Math.sin(angle) * r, -half + radius, half - radius);
-      if (collidesWithSolid(size, 0, cx, cz)) continue;
-      const d = Math.hypot(cx - x, cz - z);
-      if (d < bestDistance) {
-        bestDistance = d;
-        best = { x: cx, y: 0, z: cz };
+      if (collidesWithSolid(size, y, cx, cz)) continue;
+      const horizontal = Math.hypot(cx - x, cz - z);
+      if (horizontal < bestDistance) {
+        bestDistance = horizontal;
+        best = { x: cx, y, z: cz };
       }
     }
     if (best) return best;
   }
-  return null;
+  return best;
 }
 
 function hardRecoverLocalPlayer() {
-  const roof = findRoofRecovery(localSize, localPos.y, localPos.x, localPos.z);
-  const openGround = roof ? null : findOpenGroundRecovery(localSize, localPos.x, localPos.z);
-  const fallbackY = Math.min(localPos.y + UNSTUCK_RECOVERY_MAX_STEP, localPos.y + 10);
-  const recovery = roof || openGround || { x: localPos.x, y: fallbackY, z: localPos.z };
+  const recovery = findSameHeightRecovery(localSize, localPos.y, localPos.x, localPos.z);
+  if (!recovery) return;
   localPos.x = recovery.x;
   localPos.y = recovery.y;
   localPos.z = recovery.z;
   localVy = 0;
   stuckTimer = 0;
+  stuckBestPenetration = Infinity;
+}
+
+function resetUnstuckProgress() {
+  stuckTimer = 0;
+  stuckBestPenetration = Infinity;
+}
+
+function canMoveWithOverlap(size, y, x, z, currentPenetration) {
+  const candidatePenetration = solidOverlapInfo(size, y, x, z).penetration;
+  return candidatePenetration <= 0 || candidatePenetration <= currentPenetration + UNSTUCK_PROGRESS_EPSILON;
 }
 
 function rebuildArena(size) {
@@ -918,7 +903,7 @@ function integrateLocalPlayer(dt) {
   if (!joined || !localReady) return;
   if (localDead) {
     localVy = 0;
-    stuckTimer = 0;
+    resetUnstuckProgress();
     updateStamina(dt, false);
     return;
   }
@@ -939,43 +924,39 @@ function integrateLocalPlayer(dt) {
   const half = worldSize / 2;
   const nextX = clamp(localPos.x + dx, -half + radius, half - radius);
   const nextZ = clamp(localPos.z + dz, -half + radius, half - radius);
-  const stuck = collidesWithSolid(localSize, localPos.y, localPos.x, localPos.z);
-  stuckTimer = stuck ? stuckTimer + dt : 0;
 
   predictLocalBlockEating(dx, dz, nextX, nextZ);
 
-  if (stuck) {
-    localPos.x = nextX;
-    localPos.z = nextZ;
+  let currentPenetration = solidOverlapInfo(localSize, localPos.y, localPos.x, localPos.z).penetration;
+  if (canMoveWithOverlap(localSize, localPos.y, nextX, localPos.z, currentPenetration)) localPos.x = nextX;
 
-    const overlap = nearestOverlappingSolid(localSize, localPos.y, localPos.x, localPos.z);
-    if (overlap) {
-      let pushX = localPos.x - overlap.x;
-      let pushZ = localPos.z - overlap.z;
-      let pushLen = Math.hypot(pushX, pushZ);
-      if (pushLen <= 0.0001) {
-        pushX = Math.cos(stuckJitterPhase);
-        pushZ = Math.sin(stuckJitterPhase);
-        pushLen = 1;
-      }
-      stuckJitterPhase += dt * 18.73 + 0.071;
-      const jitterX = Math.cos(stuckJitterPhase * 2.17) * 0.18;
-      const jitterZ = Math.sin(stuckJitterPhase * 1.91) * 0.18;
-      pushX += jitterX;
-      pushZ += jitterZ;
-      pushLen = Math.max(0.0001, Math.hypot(pushX, pushZ));
-      const escalation = 1 + clamp(stuckTimer / UNSTUCK_HARD_RECOVERY_SECONDS, 0, 1) * 5;
-      const pushStep = UNSTUCK_PUSH_SPEED * escalation * dt;
-      localPos.x = clamp(localPos.x + (pushX / pushLen) * pushStep, -half + radius, half - radius);
-      localPos.z = clamp(localPos.z + (pushZ / pushLen) * pushStep, -half + radius, half - radius);
-    }
+  currentPenetration = solidOverlapInfo(localSize, localPos.y, localPos.x, localPos.z).penetration;
+  if (canMoveWithOverlap(localSize, localPos.y, localPos.x, nextZ, currentPenetration)) localPos.z = nextZ;
 
-    if (stuckTimer >= UNSTUCK_HARD_RECOVERY_SECONDS && collidesWithSolid(localSize, localPos.y, localPos.x, localPos.z)) {
-      hardRecoverLocalPlayer();
+  const overlap = solidOverlapInfo(localSize, localPos.y, localPos.x, localPos.z);
+  if (overlap.block) {
+    const pushStep = UNSTUCK_NUDGE_SPEED * dt;
+    const nudgedX = clamp(localPos.x + overlap.pushX * pushStep, -half + radius, half - radius);
+    const nudgedZ = clamp(localPos.z + overlap.pushZ * pushStep, -half + radius, half - radius);
+    if (canMoveWithOverlap(localSize, localPos.y, nudgedX, nudgedZ, overlap.penetration)) {
+      localPos.x = nudgedX;
+      localPos.z = nudgedZ;
+    } else {
+      if (canMoveWithOverlap(localSize, localPos.y, nudgedX, localPos.z, overlap.penetration)) localPos.x = nudgedX;
+      const afterNudgeX = solidOverlapInfo(localSize, localPos.y, localPos.x, localPos.z).penetration;
+      if (canMoveWithOverlap(localSize, localPos.y, localPos.x, nudgedZ, afterNudgeX)) localPos.z = nudgedZ;
     }
+  }
+
+  const finalPenetration = solidOverlapInfo(localSize, localPos.y, localPos.x, localPos.z).penetration;
+  if (finalPenetration <= 0) {
+    resetUnstuckProgress();
+  } else if (finalPenetration < stuckBestPenetration - UNSTUCK_PROGRESS_EPSILON) {
+    stuckBestPenetration = finalPenetration;
+    stuckTimer = 0;
   } else {
-    if (!collidesWithSolid(localSize, localPos.y, nextX, localPos.z)) localPos.x = nextX;
-    if (!collidesWithSolid(localSize, localPos.y, localPos.x, nextZ)) localPos.z = nextZ;
+    stuckTimer += dt;
+    if (stuckTimer >= UNSTUCK_HARD_RECOVERY_SECONDS) hardRecoverLocalPlayer();
   }
 
   const supportBefore = supportHeightAt(localSize, localPos.y, localPos.x, localPos.z);
@@ -1089,7 +1070,7 @@ playButton.addEventListener("click", () => {
   localReady = false;
   localDead = false;
   localVy = 0;
-  stuckTimer = 0;
+  resetUnstuckProgress();
   stamina = 1;
   sprintLocked = false;
   keys.clear();
@@ -1115,7 +1096,7 @@ exitLobbyButton?.addEventListener("click", () => {
   localReady = false;
   localDead = false;
   localVy = 0;
-  stuckTimer = 0;
+  resetUnstuckProgress();
   stamina = 1;
   sprintLocked = false;
   keys.clear();
@@ -1202,7 +1183,7 @@ socket.on("playerReset", (position) => {
   };
   localVy = 0;
   localDead = false;
-  stuckTimer = 0;
+  resetUnstuckProgress();
   localReady = true;
   eatOverlay.classList.add("hidden");
 });
