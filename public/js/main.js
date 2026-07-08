@@ -117,6 +117,12 @@ const BLOCK_EAT_TOUCH_EXTRA = 0.58;
 const BLOCK_EAT_FOOT_OFFSET = 0.6;
 const BLOCK_EAT_HEAD_EXTRA = 0.2;
 const PREDICTED_EAT_REVERT_MS = 1500;
+const NAME_LABEL_BASE_WIDTH = 3.4;
+const NAME_LABEL_BASE_HEIGHT = 0.85;
+const NAME_LABEL_MIN_SCALE = 1.0;
+const NAME_LABEL_MAX_SCALE = 4.5;
+const UNSTUCK_PUSH_SPEED = 7.5;
+const CAMERA_OCCLUSION_MIN_STANDOFF = 2.8;
 
 function material(color) {
   if (!materialCache.has(color)) {
@@ -283,6 +289,25 @@ function collidesWithSolid(size, y, x, z) {
   return false;
 }
 
+function nearestOverlappingSolid(size, y, x, z) {
+  const radius = playerRadius(size);
+  const bodyRadius = radius + 0.5;
+  let nearest = null;
+  let nearestDistanceSq = Infinity;
+  for (const block of blocksNear(solidBlockCells, x, z, bodyRadius)) {
+    if (!block.active || !verticalOverlapsPlayer(size, y, block)) continue;
+    if (Math.abs(x - block.x) >= bodyRadius || Math.abs(z - block.z) >= bodyRadius) continue;
+    const dx = x - block.x;
+    const dz = z - block.z;
+    const distanceSq = dx * dx + dz * dz;
+    if (distanceSq < nearestDistanceSq) {
+      nearest = block;
+      nearestDistanceSq = distanceSq;
+    }
+  }
+  return nearest;
+}
+
 function supportHeightAt(size, y, x, z) {
   const radius = playerRadius(size);
   let support = 0;
@@ -340,7 +365,7 @@ function makeNameSprite(text) {
   drawNameTag(ctx, c, text, 1);
   const texture = new THREE.CanvasTexture(c);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
-  sprite.scale.set(3.4, 0.85, 1);
+  sprite.scale.set(NAME_LABEL_BASE_WIDTH, NAME_LABEL_BASE_HEIGHT, 1);
   sprite.userData.canvas = c;
   sprite.userData.ctx = ctx;
   sprite.userData.texture = texture;
@@ -649,11 +674,32 @@ function integrateLocalPlayer(dt) {
   const half = worldSize / 2;
   const nextX = clamp(localPos.x + dx, -half + radius, half - radius);
   const nextZ = clamp(localPos.z + dz, -half + radius, half - radius);
+  const stuck = collidesWithSolid(localSize, localPos.y, localPos.x, localPos.z);
 
   predictLocalBlockEating(dx, dz, nextX, nextZ);
 
-  if (!collidesWithSolid(localSize, localPos.y, nextX, localPos.z)) localPos.x = nextX;
-  if (!collidesWithSolid(localSize, localPos.y, localPos.x, nextZ)) localPos.z = nextZ;
+  if (stuck) {
+    localPos.x = nextX;
+    localPos.z = nextZ;
+
+    const overlap = nearestOverlappingSolid(localSize, localPos.y, localPos.x, localPos.z);
+    if (overlap) {
+      let pushX = localPos.x - overlap.x;
+      let pushZ = localPos.z - overlap.z;
+      let pushLen = Math.hypot(pushX, pushZ);
+      if (pushLen <= 0.0001) {
+        pushX = 1;
+        pushZ = 0;
+        pushLen = 1;
+      }
+      const pushStep = UNSTUCK_PUSH_SPEED * dt;
+      localPos.x = clamp(localPos.x + (pushX / pushLen) * pushStep, -half + radius, half - radius);
+      localPos.z = clamp(localPos.z + (pushZ / pushLen) * pushStep, -half + radius, half - radius);
+    }
+  } else {
+    if (!collidesWithSolid(localSize, localPos.y, nextX, localPos.z)) localPos.x = nextX;
+    if (!collidesWithSolid(localSize, localPos.y, localPos.x, nextZ)) localPos.z = nextZ;
+  }
 
   const supportBefore = supportHeightAt(localSize, localPos.y, localPos.x, localPos.z);
   const grounded = localPos.y <= supportBefore + GROUND_EPSILON && localVy <= 0;
@@ -899,7 +945,9 @@ function animate() {
     entry.group.scale.setScalar(scale);
     entry.shadow.position.set(entry.current.x, 0.04, entry.current.z);
     entry.shadow.scale.setScalar(target.shadowRadius || 1);
-    entry.label.position.set(entry.current.x, entry.current.y + scale * 2.45 + 0.65, entry.current.z);
+    const labelScale = clamp(scale * 0.55, NAME_LABEL_MIN_SCALE, NAME_LABEL_MAX_SCALE);
+    entry.label.scale.set(NAME_LABEL_BASE_WIDTH * labelScale, NAME_LABEL_BASE_HEIGHT * labelScale, 1);
+    entry.label.position.set(entry.current.x, entry.current.y + scale * 2.45 + 0.65 + labelScale * 0.25, entry.current.z);
     entry.label.lookAt(camera.position);
     if (id === selfId) entry.shadow.material.opacity = 0.32;
     animateWalk(entry, dt);
@@ -927,7 +975,8 @@ function animate() {
       Math.max(0.85, eye.y + vert),
       eye.z - Math.cos(yaw) * horiz
     );
-    const cameraTarget = resolveCameraOcclusion(eye, desiredCamera, distance, pos);
+    const minCameraStandoff = Math.max(CAMERA_OCCLUSION_MIN_STANDOFF, scale * 0.65);
+    const cameraTarget = resolveCameraOcclusion(eye, desiredCamera, distance, pos, minCameraStandoff);
     if (isFiniteVector3(eye) && isFiniteVector3(desiredCamera) && isFiniteVector3(cameraTarget)) {
       camera.position.lerp(cameraTarget, 0.18);
       camera.lookAt(pos.x, pos.y + eyeHeight * 0.5, pos.z);
@@ -940,7 +989,7 @@ function animate() {
   renderer.render(scene, camera);
 }
 
-function resolveCameraOcclusion(eye, desiredCamera, cameraDistance, playerPos) {
+function resolveCameraOcclusion(eye, desiredCamera, cameraDistance, playerPos, minStandoff = CAMERA_OCCLUSION_MIN_STANDOFF) {
   cameraRayDirection.copy(desiredCamera).sub(eye);
   const rayLength = cameraRayDirection.length();
   if (rayLength <= 0.001) return desiredCamera;
@@ -960,7 +1009,8 @@ function resolveCameraOcclusion(eye, desiredCamera, cameraDistance, playerPos) {
 
   const hits = cameraRaycaster.intersectObjects(cameraHitCandidates, false);
   if (hits.length === 0) return desiredCamera;
-  const clampedDistance = Math.max(1.2, hits[0].distance - 0.4);
+  if (hits[0].distance <= minStandoff) return desiredCamera;
+  const clampedDistance = Math.max(minStandoff, hits[0].distance - 0.4);
   return eye.clone().addScaledVector(cameraRayDirection, clampedDistance);
 }
 
