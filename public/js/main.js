@@ -49,6 +49,7 @@ const solidBlockCells = new Map();
 const predictedBlockEats = new Map();
 const players = new Map();
 let lobbyStatusTimer = null;
+let pointerLockRetryTimer = null;
 const cameraRaycaster = new THREE.Raycaster();
 const cameraRayDirection = new THREE.Vector3();
 const cameraHitCandidates = [];
@@ -126,6 +127,10 @@ function material(color) {
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
+}
+
+function isFiniteVector3(vector) {
+  return Number.isFinite(vector.x) && Number.isFinite(vector.y) && Number.isFinite(vector.z);
 }
 
 function cellKey(x, z) {
@@ -680,6 +685,7 @@ function updatePauseUi() {
   }
 
   if (pointerLocked) {
+    clearPointerLockRetry();
     pauseMenu?.classList.add("hidden");
     escHint?.classList.remove("hidden");
     return;
@@ -688,6 +694,36 @@ function updatePauseUi() {
   keys.clear();
   pauseMenu?.classList.remove("hidden");
   escHint?.classList.add("hidden");
+}
+
+function clearPointerLockRetry() {
+  if (!pointerLockRetryTimer) return;
+  window.clearTimeout(pointerLockRetryTimer);
+  pointerLockRetryTimer = null;
+}
+
+function schedulePointerLockRetry() {
+  if (pointerLockRetryTimer) return;
+  pointerLockRetryTimer = window.setTimeout(() => {
+    pointerLockRetryTimer = null;
+    if (!joined || document.pointerLockElement === canvas) return;
+    requestGamePointerLock(false);
+  }, 400);
+}
+
+function requestGamePointerLock(allowRetry = true) {
+  if (!joined || document.pointerLockElement === canvas) return;
+
+  try {
+    const lockRequest = canvas.requestPointerLock?.();
+    if (lockRequest && typeof lockRequest.then === "function") {
+      lockRequest.catch(() => {
+        if (allowRetry) schedulePointerLockRetry();
+      });
+    }
+  } catch (error) {
+    if (allowRetry) schedulePointerLockRetry();
+  }
 }
 
 async function refreshLobbyStatus() {
@@ -737,13 +773,13 @@ playButton.addEventListener("click", () => {
   startPanel.classList.add("hidden");
   hud.classList.remove("hidden");
   socket.emit("hello", { glToken: identity.token, name: identity.name || "" });
-  canvas.requestPointerLock?.();
+  requestGamePointerLock();
   updatePauseUi();
 });
 
 resumeButton?.addEventListener("click", () => {
   if (!joined) return;
-  canvas.requestPointerLock?.();
+  requestGamePointerLock();
 });
 
 exitLobbyButton?.addEventListener("click", () => {
@@ -756,6 +792,7 @@ exitLobbyButton?.addEventListener("click", () => {
   stamina = 1;
   sprintLocked = false;
   keys.clear();
+  clearPointerLockRetry();
   document.exitPointerLock?.();
   hud.classList.add("hidden");
   pauseMenu?.classList.add("hidden");
@@ -783,7 +820,7 @@ document.addEventListener("mousemove", (event) => {
 });
 
 canvas.addEventListener("click", () => {
-  if (joined) canvas.requestPointerLock?.();
+  requestGamePointerLock();
 });
 
 document.addEventListener("pointerlockchange", updatePauseUi);
@@ -891,8 +928,10 @@ function animate() {
       eye.z - Math.cos(yaw) * horiz
     );
     const cameraTarget = resolveCameraOcclusion(eye, desiredCamera, distance, pos);
-    camera.position.lerp(cameraTarget, 0.18);
-    camera.lookAt(pos.x, pos.y + eyeHeight * 0.5, pos.z);
+    if (isFiniteVector3(eye) && isFiniteVector3(desiredCamera) && isFiniteVector3(cameraTarget)) {
+      camera.position.lerp(cameraTarget, 0.18);
+      camera.lookAt(pos.x, pos.y + eyeHeight * 0.5, pos.z);
+    }
   } else {
     camera.position.set(25, 26, 35);
     camera.lookAt(0, 0, 0);

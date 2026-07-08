@@ -17,6 +17,7 @@ const PLAYER_START_SIZE = 1;
 const MIN_PLAYER_SIZE = 0.75;
 const SHADOW_EAT_SECONDS = 3;
 const FLOOR_SPACING = 10;
+const STEP_TOLERANCE = 0.34;
 const PLAYER_VISUAL_BASE_SCALE = 0.55;
 const MAX_CLIENT_POSITION_STEP = 12;
 const GAME_ID = "eat-to-grow";
@@ -365,6 +366,7 @@ function updateBlockEating(player) {
     if (!block.active) continue;
     const blockBottom = block.y - block.size / 2;
     const blockTop = block.y + block.size / 2;
+    if (blockTop <= player.y + STEP_TOLERANCE) continue;
     if (blockTop < footY || blockBottom > headY) continue;
     const d = Math.hypot(player.x - block.x, player.z - block.z);
     const touching = Math.abs(player.x - block.x) <= radius + 0.58 && Math.abs(player.z - block.z) <= radius + 0.58;
