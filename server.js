@@ -16,6 +16,7 @@ const BLOCK_REGEN_MS = 25000;
 const PLAYER_START_SIZE = 1;
 const MIN_PLAYER_SIZE = 0.75;
 const SHADOW_EAT_SECONDS = 3;
+const RESPAWN_DELAY_MS = 2200;
 const FLOOR_SPACING = 10;
 const STEP_TOLERANCE = 0.34;
 const PLAYER_VISUAL_BASE_SCALE = 0.55;
@@ -254,6 +255,7 @@ function serializePlayer(player) {
     shadowRadius: shadowRadius(player.size),
     eatenBy: player.eatenBy,
     eatCountdown: player.eatCountdown,
+    dead: Boolean(player.dead),
     coins: player.coins,
   };
 }
@@ -298,6 +300,8 @@ function makePlayer(socket, name, hubProfile) {
     nextPeriodicReportAt: Date.now() + 60000,
     eatenBy: null,
     eatCountdown: null,
+    dead: false,
+    respawnAt: 0,
     shadowContact: new Map(),
   };
 }
@@ -358,6 +362,7 @@ function consumeBlock(player, block) {
 }
 
 function updateBlockEating(player) {
+  if (player.dead) return;
   const radius = playerRadius(player.size);
   const reach = radius + 1.15;
   const footY = player.y - 0.6;
@@ -383,6 +388,8 @@ function respawnPlayer(player) {
   player.size = PLAYER_START_SIZE;
   player.eatenBy = null;
   player.eatCountdown = null;
+  player.dead = false;
+  player.respawnAt = 0;
   player.shadowContact.clear();
   io.to(player.id).emit("playerReset", { x: player.x, y: player.y, z: player.z });
 }
@@ -390,10 +397,18 @@ function respawnPlayer(player) {
 function updatePlayerEating() {
   const now = Date.now();
   for (const victim of players.values()) {
+    if (victim.dead) {
+      victim.eatenBy = null;
+      victim.eatCountdown = null;
+      victim.shadowContact.clear();
+      continue;
+    }
+
     let activePredator = null;
     let strongestRatio = 1;
     for (const eater of players.values()) {
       if (eater.id === victim.id) continue;
+      if (eater.dead) continue;
       if (eater.size < victim.size * 1.15) continue;
       if (distance2d(eater, victim) > shadowRadius(eater.size)) continue;
       const ratio = eater.size / Math.max(victim.size, MIN_PLAYER_SIZE);
@@ -433,8 +448,17 @@ function updatePlayerEating() {
       activePredator.pendingPlayersEaten = (activePredator.pendingPlayersEaten || 0) + 1;
       activePredator.pendingPlayerCoins = (activePredator.pendingPlayerCoins || 0) + 8;
       activePredator.bestSize = Math.max(activePredator.bestSize, activePredator.size);
-      io.emit("playerConsumed", { eaterId: activePredator.id, victimId: victim.id });
-      respawnPlayer(victim);
+      victim.dead = true;
+      victim.respawnAt = now + RESPAWN_DELAY_MS;
+      victim.eatenBy = null;
+      victim.eatCountdown = null;
+      victim.shadowContact.clear();
+      io.emit("playerConsumed", {
+        eaterId: activePredator.id,
+        eaterName: activePredator.name,
+        victimId: victim.id,
+        victimName: victim.name,
+      });
       maybeReportProgress(activePredator, "player eaten");
     }
   }
@@ -443,6 +467,10 @@ function updatePlayerEating() {
 function tick() {
   const now = Date.now();
   for (const player of players.values()) {
+    if (player.dead) {
+      if (now >= player.respawnAt) respawnPlayer(player);
+      continue;
+    }
     updateBlockEating(player);
     if (now >= player.nextPeriodicReportAt) {
       player.nextPeriodicReportAt = now + 60000;
@@ -508,7 +536,7 @@ function applyClientPosition(player, input) {
 function removePlayer(socket, reason) {
   const player = players.get(socket.id);
   if (!player) return;
-  maybeReportProgress(player, reason);
+  if (!player.dead) maybeReportProgress(player, reason);
   players.delete(socket.id);
   io.emit("playerLeft", socket.id);
 }
@@ -539,6 +567,7 @@ io.on("connection", (socket) => {
   socket.on("input", (input = {}) => {
     const player = players.get(socket.id);
     if (!player) return;
+    if (player.dead) return;
     applyClientPosition(player, input);
   });
 

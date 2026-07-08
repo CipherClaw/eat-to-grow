@@ -158,6 +158,52 @@ body {
   border-radius: 8px;
 }
 
+.action-feed {
+  position: fixed;
+  left: 18px;
+  top: 58px;
+  width: min(280px, calc(100vw - 36px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.action-feed:empty {
+  display: none;
+}
+
+.action-feed-entry {
+  padding: 7px 10px;
+  background: rgba(8, 12, 18, 0.66);
+  border-radius: 6px;
+  color: #d8ecf8;
+  font-size: 13px;
+  font-weight: 700;
+  line-height: 1.25;
+  animation: feedEntryFade 7s ease forwards;
+}
+
+.action-feed-entry b {
+  color: #fff;
+}
+
+.eat-toast {
+  position: fixed;
+  left: 50%;
+  top: 18%;
+  transform: translateX(-50%);
+  padding: 12px 18px;
+  background: rgba(8, 12, 18, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+  color: #fff;
+  font-size: 26px;
+  font-weight: 900;
+  text-align: center;
+  text-shadow: 0 2px 12px rgba(0, 0, 0, 0.65);
+  animation: eatToastFade 2.5s ease forwards;
+}
+
 .leaderboard-title {
   margin-bottom: 8px;
   color: #b9d5e8;
@@ -254,6 +300,30 @@ body {
   font-size: 86px;
 }
 
+@keyframes eatToastFade {
+  0%,
+  72% {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  100% {
+    opacity: 0;
+    transform: translateX(-50%) translateY(-14px);
+  }
+}
+
+@keyframes feedEntryFade {
+  0%,
+  78% {
+    opacity: 1;
+  }
+
+  100% {
+    opacity: 0.35;
+  }
+}
+
 @media (max-width: 700px) {
   .leaderboard {
     width: 190px;
@@ -266,6 +336,17 @@ body {
 
   .eat-overlay {
     font-size: 32px;
+  }
+
+  .action-feed {
+    left: 10px;
+    top: 52px;
+    width: min(220px, calc(100vw - 20px));
+  }
+
+  .eat-toast {
+    width: min(280px, calc(100vw - 32px));
+    font-size: 21px;
   }
 
   .gl-pause-actions {

@@ -35,10 +35,12 @@
         <div class="stamina-fill" id="staminaFill"></div>
       </div>
       <div class="wallet" id="walletReadout"></div>
+      <div class="action-feed" id="actionFeed" aria-live="polite"></div>
       <div class="leaderboard">
         <div class="leaderboard-title">Leaderboard</div>
         <ol id="leaderboardList"></ol>
       </div>
+      <div class="eat-toast hidden" id="eatToast"></div>
     </div>
 
     <div id="pauseMenu" class="pause-menu hidden">
@@ -53,7 +55,7 @@
     </div>
 
     <div id="eatOverlay" class="eat-overlay hidden">
-      <div>You're being eaten!</div>
+      <div id="eatOverlayText">You're being eaten!</div>
       <strong id="eatCountdown">3</strong>
     </div>
 

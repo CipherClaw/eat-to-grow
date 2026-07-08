@@ -13,7 +13,10 @@ const sizeReadout = document.getElementById("sizeReadout");
 const walletReadout = document.getElementById("walletReadout");
 const leaderboardList = document.getElementById("leaderboardList");
 const eatOverlay = document.getElementById("eatOverlay");
+const eatOverlayText = document.getElementById("eatOverlayText");
 const eatCountdown = document.getElementById("eatCountdown");
+const actionFeed = document.getElementById("actionFeed");
+const eatToast = document.getElementById("eatToast");
 const hubLinkStart = document.getElementById("hubLinkStart");
 const escHint = document.getElementById("escHint");
 const pauseMenu = document.getElementById("pauseMenu");
@@ -39,9 +42,12 @@ let localPos = { x: 0, y: 0, z: 0 };
 let localVy = 0;
 let localReady = false;
 let localSize = 1;
+let localDead = false;
 let lastFrameTime = performance.now();
 let stamina = 1;
 let sprintLocked = false;
+let stuckTimer = 0;
+let stuckJitterPhase = 0;
 
 const keys = new Set();
 const blocks = new Map();
@@ -122,7 +128,21 @@ const NAME_LABEL_BASE_HEIGHT = 0.85;
 const NAME_LABEL_MIN_SCALE = 1.0;
 const NAME_LABEL_MAX_SCALE = 4.5;
 const UNSTUCK_PUSH_SPEED = 7.5;
+const UNSTUCK_HARD_RECOVERY_SECONDS = 0.9;
+const UNSTUCK_RECOVERY_MAX_STEP = 11.4;
+const UNSTUCK_OPEN_SCAN_STEP = 0.75;
+const EAT_PARTICLE_COUNT = 36;
+const EAT_PARTICLE_RATE = 34;
+const EAT_PARTICLE_LIFETIME = 0.75;
 const CAMERA_OCCLUSION_MIN_STANDOFF = 2.8;
+
+const eatParticleMaterial = new THREE.PointsMaterial({
+  size: 0.28,
+  vertexColors: true,
+  transparent: true,
+  opacity: 0.95,
+  depthWrite: false,
+});
 
 function material(color) {
   if (!materialCache.has(color)) {
@@ -322,6 +342,75 @@ function supportHeightAt(size, y, x, z) {
   return support;
 }
 
+function findRoofRecovery(size, y, x, z) {
+  const radius = playerRadius(size);
+  let best = null;
+  let bestScore = Infinity;
+  for (const block of blocksNear(solidBlockCells, x, z, UNSTUCK_RECOVERY_MAX_STEP)) {
+    if (!block.active) continue;
+    const top = block.y + block.size / 2;
+    if (top < y - 0.05 || top > y + UNSTUCK_RECOVERY_MAX_STEP) continue;
+    const candidates = [
+      [x, z],
+      [block.x, block.z],
+      [block.x + radius + 0.62, block.z],
+      [block.x - radius - 0.62, block.z],
+      [block.x, block.z + radius + 0.62],
+      [block.x, block.z - radius - 0.62],
+    ];
+    for (const [cx, cz] of candidates) {
+      const half = worldSize / 2;
+      if (cx < -half + radius || cx > half - radius || cz < -half + radius || cz > half - radius) continue;
+      if (collidesWithSolid(size, top, cx, cz)) continue;
+      const horizontal = Math.hypot(cx - x, cz - z);
+      const vertical = Math.max(0, top - y);
+      const score = horizontal + vertical * 0.35;
+      if (score < bestScore) {
+        bestScore = score;
+        best = { x: cx, y: top, z: cz };
+      }
+    }
+  }
+  return best;
+}
+
+function findOpenGroundRecovery(size, x, z) {
+  const radius = playerRadius(size);
+  const half = worldSize / 2;
+  if (!collidesWithSolid(size, 0, x, z)) return { x, y: 0, z };
+
+  let best = null;
+  let bestDistance = Infinity;
+  for (let r = UNSTUCK_OPEN_SCAN_STEP; r <= UNSTUCK_RECOVERY_MAX_STEP; r += UNSTUCK_OPEN_SCAN_STEP) {
+    const samples = Math.max(12, Math.ceil(r * 10));
+    for (let i = 0; i < samples; i++) {
+      const angle = (i / samples) * Math.PI * 2 + r * 0.37;
+      const cx = clamp(x + Math.cos(angle) * r, -half + radius, half - radius);
+      const cz = clamp(z + Math.sin(angle) * r, -half + radius, half - radius);
+      if (collidesWithSolid(size, 0, cx, cz)) continue;
+      const d = Math.hypot(cx - x, cz - z);
+      if (d < bestDistance) {
+        bestDistance = d;
+        best = { x: cx, y: 0, z: cz };
+      }
+    }
+    if (best) return best;
+  }
+  return null;
+}
+
+function hardRecoverLocalPlayer() {
+  const roof = findRoofRecovery(localSize, localPos.y, localPos.x, localPos.z);
+  const openGround = roof ? null : findOpenGroundRecovery(localSize, localPos.x, localPos.z);
+  const fallbackY = Math.min(localPos.y + UNSTUCK_RECOVERY_MAX_STEP, localPos.y + 10);
+  const recovery = roof || openGround || { x: localPos.x, y: fallbackY, z: localPos.z };
+  localPos.x = recovery.x;
+  localPos.y = recovery.y;
+  localPos.z = recovery.z;
+  localVy = 0;
+  stuckTimer = 0;
+}
+
 function rebuildArena(size) {
   worldSize = size;
   ground.geometry.dispose();
@@ -423,6 +512,145 @@ function roundedRect(ctx, x, y, width, height, radius) {
   ctx.closePath();
 }
 
+function hslToRgb(h, s, l) {
+  const c = (1 - Math.abs(2 * l - 1)) * s;
+  const hp = h / 60;
+  const x = c * (1 - Math.abs((hp % 2) - 1));
+  let r = 0;
+  let g = 0;
+  let b = 0;
+  if (hp < 1) {
+    r = c;
+    g = x;
+  } else if (hp < 2) {
+    r = x;
+    g = c;
+  } else if (hp < 3) {
+    g = c;
+    b = x;
+  } else if (hp < 4) {
+    g = x;
+    b = c;
+  } else if (hp < 5) {
+    r = x;
+    b = c;
+  } else {
+    r = c;
+    b = x;
+  }
+  const m = l - c / 2;
+  return [r + m, g + m, b + m];
+}
+
+function createEatingEffect() {
+  const positions = new Float32Array(EAT_PARTICLE_COUNT * 3);
+  const colors = new Float32Array(EAT_PARTICLE_COUNT * 3);
+  const baseColors = new Float32Array(EAT_PARTICLE_COUNT * 3);
+  const velocities = new Float32Array(EAT_PARTICLE_COUNT * 3);
+  const lives = new Float32Array(EAT_PARTICLE_COUNT);
+  for (let i = 0; i < EAT_PARTICLE_COUNT; i++) {
+    positions[i * 3 + 1] = -999;
+  }
+  const geometry = new THREE.BufferGeometry();
+  geometry.setAttribute("position", new THREE.BufferAttribute(positions, 3));
+  geometry.setAttribute("color", new THREE.BufferAttribute(colors, 3));
+  const points = new THREE.Points(geometry, eatParticleMaterial);
+  points.frustumCulled = false;
+  points.visible = false;
+  scene.add(points);
+  return {
+    points,
+    geometry,
+    positions,
+    colors,
+    baseColors,
+    velocities,
+    lives,
+    cursor: 0,
+    spawnAccumulator: 0,
+    phase: 0,
+  };
+}
+
+function spawnEatingParticle(effect, entry, scale) {
+  const i = effect.cursor;
+  effect.cursor = (effect.cursor + 1) % EAT_PARTICLE_COUNT;
+  effect.phase += 2.399963;
+
+  const angle = effect.phase;
+  const ring = (0.45 + ((i * 17) % 100) / 180) * scale;
+  const px = entry.current.x + Math.cos(angle) * ring;
+  const py = entry.current.y + (0.35 + ((i * 23) % 100) / 100 * 1.85) * scale;
+  const pz = entry.current.z + Math.sin(angle) * ring;
+  const offset = i * 3;
+  effect.positions[offset] = px;
+  effect.positions[offset + 1] = py;
+  effect.positions[offset + 2] = pz;
+  effect.velocities[offset] = Math.cos(angle + 0.9) * 0.18 * scale;
+  effect.velocities[offset + 1] = (1.2 + ((i * 13) % 100) / 130) * scale;
+  effect.velocities[offset + 2] = Math.sin(angle + 0.9) * 0.18 * scale;
+  effect.lives[i] = EAT_PARTICLE_LIFETIME;
+
+  const [r, g, b] = hslToRgb((i * 67 + effect.phase * 38) % 360, 0.92, 0.62);
+  effect.baseColors[offset] = r;
+  effect.baseColors[offset + 1] = g;
+  effect.baseColors[offset + 2] = b;
+  effect.colors[offset] = r;
+  effect.colors[offset + 1] = g;
+  effect.colors[offset + 2] = b;
+}
+
+function clearEatingEffect(effect) {
+  if (!effect) return;
+  let changed = false;
+  for (let i = 0; i < EAT_PARTICLE_COUNT; i++) {
+    if (effect.lives[i] <= 0) continue;
+    effect.lives[i] = 0;
+    effect.positions[i * 3 + 1] = -999;
+    changed = true;
+  }
+  effect.spawnAccumulator = 0;
+  effect.points.visible = false;
+  if (changed) effect.geometry.attributes.position.needsUpdate = true;
+}
+
+function updateEatingEffect(entry, dt) {
+  const effect = entry.eatEffect;
+  if (!effect) return;
+  const active = Boolean(entry.target.eatenBy) && !entry.target.dead;
+  const scale = playerScale(entry.current.size);
+  if (active) {
+    effect.spawnAccumulator += dt * EAT_PARTICLE_RATE;
+    const spawnCount = Math.min(6, Math.floor(effect.spawnAccumulator));
+    effect.spawnAccumulator -= spawnCount;
+    for (let i = 0; i < spawnCount; i++) spawnEatingParticle(effect, entry, scale);
+  } else if (effect.spawnAccumulator !== 0) {
+    effect.spawnAccumulator = 0;
+  }
+
+  let anyLive = false;
+  for (let i = 0; i < EAT_PARTICLE_COUNT; i++) {
+    if (effect.lives[i] <= 0) continue;
+    effect.lives[i] = Math.max(0, effect.lives[i] - dt);
+    const offset = i * 3;
+    if (effect.lives[i] <= 0) {
+      effect.positions[offset + 1] = -999;
+      continue;
+    }
+    const fade = effect.lives[i] / EAT_PARTICLE_LIFETIME;
+    effect.positions[offset] += effect.velocities[offset] * dt;
+    effect.positions[offset + 1] += effect.velocities[offset + 1] * dt;
+    effect.positions[offset + 2] += effect.velocities[offset + 2] * dt;
+    effect.colors[offset] = effect.baseColors[offset] * fade;
+    effect.colors[offset + 1] = effect.baseColors[offset + 1] * fade;
+    effect.colors[offset + 2] = effect.baseColors[offset + 2] * fade;
+    anyLive = true;
+  }
+  effect.points.visible = anyLive || active;
+  effect.geometry.attributes.position.needsUpdate = true;
+  effect.geometry.attributes.color.needsUpdate = true;
+}
+
 function createPlayerMesh(player) {
   const group = new THREE.Group();
   const bodyMat = material(player.color || "#d85c4a");
@@ -471,6 +699,7 @@ function createPlayerMesh(player) {
     armR,
     shadow,
     label,
+    eatEffect: createEatingEffect(),
     current: { x: player.x, y: player.y || 0, z: player.z, yaw: player.yaw, size: player.size },
     previous: { x: player.x, y: player.y || 0, z: player.z },
     walkPhase: 0,
@@ -494,6 +723,10 @@ function removePlayer(id) {
   scene.remove(entry.group);
   scene.remove(entry.shadow);
   scene.remove(entry.label);
+  if (entry.eatEffect) {
+    scene.remove(entry.eatEffect.points);
+    entry.eatEffect.geometry.dispose();
+  }
   players.delete(id);
 }
 
@@ -564,6 +797,7 @@ function handleSnapshot(snapshot) {
   const self = snapshot.players.find((p) => p.id === selfId);
   if (self) {
     localSize = self.size;
+    localDead = Boolean(self.dead);
     if (!localReady) seedLocalPosition(self);
   }
   renderHud(snapshot);
@@ -580,7 +814,12 @@ function renderHud(snapshot) {
   const self = snapshot.players.find((p) => p.id === selfId);
   if (self) {
     sizeReadout.textContent = `Size: ${self.size.toFixed(1)}u`;
-    if (self.eatenBy) {
+    if (self.dead) {
+      eatOverlayText.textContent = "You were eaten!";
+      eatCountdown.textContent = "Respawning";
+      eatOverlay.classList.remove("hidden");
+    } else if (self.eatenBy) {
+      eatOverlayText.textContent = "You're being eaten!";
       eatOverlay.classList.remove("hidden");
       eatCountdown.textContent = Math.ceil(self.eatCountdown || 0);
     } else {
@@ -597,6 +836,26 @@ function renderHud(snapshot) {
   }
 }
 
+function addActionFeedEntry(eaterName, victimName) {
+  if (!actionFeed) return;
+  const item = document.createElement("div");
+  item.className = "action-feed-entry";
+  item.innerHTML = `<b>${escapeHtml(eaterName)}</b> ate <b>${escapeHtml(victimName)}</b>`;
+  actionFeed.prepend(item);
+  while (actionFeed.children.length > 8) actionFeed.lastElementChild.remove();
+  window.setTimeout(() => item.remove(), 8000);
+}
+
+function showEatToast(victimName) {
+  if (!eatToast) return;
+  eatToast.textContent = `You ate ${victimName}!`;
+  eatToast.classList.remove("hidden");
+  eatToast.style.animation = "none";
+  eatToast.offsetHeight;
+  eatToast.style.animation = "";
+  window.setTimeout(() => eatToast.classList.add("hidden"), 2500);
+}
+
 function escapeHtml(value) {
   return String(value).replace(/[&<>"']/g, (ch) => ({
     "&": "&amp;",
@@ -608,7 +867,7 @@ function escapeHtml(value) {
 }
 
 function sendInput() {
-  if (!joined || !localReady) return;
+  if (!joined || !localReady || localDead) return;
   socket.emit("input", {
     x: localPos.x,
     y: localPos.y,
@@ -657,6 +916,12 @@ function updateStaminaHud() {
 
 function integrateLocalPlayer(dt) {
   if (!joined || !localReady) return;
+  if (localDead) {
+    localVy = 0;
+    stuckTimer = 0;
+    updateStamina(dt, false);
+    return;
+  }
   let { forward, strafe } = inputAxes();
   const len = Math.hypot(forward, strafe);
   if (len > 1) {
@@ -675,6 +940,7 @@ function integrateLocalPlayer(dt) {
   const nextX = clamp(localPos.x + dx, -half + radius, half - radius);
   const nextZ = clamp(localPos.z + dz, -half + radius, half - radius);
   const stuck = collidesWithSolid(localSize, localPos.y, localPos.x, localPos.z);
+  stuckTimer = stuck ? stuckTimer + dt : 0;
 
   predictLocalBlockEating(dx, dz, nextX, nextZ);
 
@@ -688,13 +954,24 @@ function integrateLocalPlayer(dt) {
       let pushZ = localPos.z - overlap.z;
       let pushLen = Math.hypot(pushX, pushZ);
       if (pushLen <= 0.0001) {
-        pushX = 1;
-        pushZ = 0;
+        pushX = Math.cos(stuckJitterPhase);
+        pushZ = Math.sin(stuckJitterPhase);
         pushLen = 1;
       }
-      const pushStep = UNSTUCK_PUSH_SPEED * dt;
+      stuckJitterPhase += dt * 18.73 + 0.071;
+      const jitterX = Math.cos(stuckJitterPhase * 2.17) * 0.18;
+      const jitterZ = Math.sin(stuckJitterPhase * 1.91) * 0.18;
+      pushX += jitterX;
+      pushZ += jitterZ;
+      pushLen = Math.max(0.0001, Math.hypot(pushX, pushZ));
+      const escalation = 1 + clamp(stuckTimer / UNSTUCK_HARD_RECOVERY_SECONDS, 0, 1) * 5;
+      const pushStep = UNSTUCK_PUSH_SPEED * escalation * dt;
       localPos.x = clamp(localPos.x + (pushX / pushLen) * pushStep, -half + radius, half - radius);
       localPos.z = clamp(localPos.z + (pushZ / pushLen) * pushStep, -half + radius, half - radius);
+    }
+
+    if (stuckTimer >= UNSTUCK_HARD_RECOVERY_SECONDS && collidesWithSolid(localSize, localPos.y, localPos.x, localPos.z)) {
+      hardRecoverLocalPlayer();
     }
   } else {
     if (!collidesWithSolid(localSize, localPos.y, nextX, localPos.z)) localPos.x = nextX;
@@ -810,7 +1087,9 @@ playButton.addEventListener("click", () => {
   if (joined) return;
   joined = true;
   localReady = false;
+  localDead = false;
   localVy = 0;
+  stuckTimer = 0;
   stamina = 1;
   sprintLocked = false;
   keys.clear();
@@ -834,7 +1113,9 @@ exitLobbyButton?.addEventListener("click", () => {
   joined = false;
   selfId = null;
   localReady = false;
+  localDead = false;
   localVy = 0;
+  stuckTimer = 0;
   stamina = 1;
   sprintLocked = false;
   keys.clear();
@@ -844,6 +1125,8 @@ exitLobbyButton?.addEventListener("click", () => {
   pauseMenu?.classList.add("hidden");
   escHint?.classList.add("hidden");
   eatOverlay.classList.add("hidden");
+  if (actionFeed) actionFeed.innerHTML = "";
+  eatToast?.classList.add("hidden");
   startPanel.classList.remove("hidden");
   updateStaminaHud();
   startLobbyStatusPolling();
@@ -893,9 +1176,23 @@ socket.on("blockRespawned", (block) => {
   if (!blocks.has(block.id)) createBlock(block);
   setBlockActive(block.id, true);
 });
-socket.on("playerConsumed", ({ victimId }) => {
+socket.on("playerConsumed", ({ eaterId, eaterName, victimId, victimName }) => {
+  addActionFeedEntry(eaterName || "Someone", victimName || "someone");
+  if (eaterId === selfId) showEatToast(victimName || "someone");
   const entry = players.get(victimId);
-  if (entry) entry.group.position.y = 0.2;
+  if (entry) {
+    entry.target.dead = true;
+    entry.target.eatenBy = null;
+    entry.group.position.y = 0.2;
+    clearEatingEffect(entry.eatEffect);
+  }
+  if (victimId === selfId) {
+    localDead = true;
+    localVy = 0;
+    eatOverlayText.textContent = "You were eaten!";
+    eatCountdown.textContent = "Respawning";
+    eatOverlay.classList.remove("hidden");
+  }
 });
 socket.on("playerReset", (position) => {
   localPos = {
@@ -904,7 +1201,10 @@ socket.on("playerReset", (position) => {
     z: Number(position.z) || 0,
   };
   localVy = 0;
+  localDead = false;
+  stuckTimer = 0;
   localReady = true;
+  eatOverlay.classList.add("hidden");
 });
 socket.on("walletUpdate", (coins) => {
   walletCoins = coins;
@@ -940,16 +1240,22 @@ function animate() {
     }
     entry.current.size += (target.size - entry.current.size) * 0.18;
     const scale = playerScale(entry.current.size);
+    const dead = Boolean(target.dead);
     entry.group.position.set(entry.current.x, entry.current.y, entry.current.z);
     entry.group.rotation.y = entry.current.yaw;
     entry.group.scale.setScalar(scale);
+    entry.group.visible = !dead;
     entry.shadow.position.set(entry.current.x, 0.04, entry.current.z);
     entry.shadow.scale.setScalar(target.shadowRadius || 1);
+    entry.shadow.visible = !dead;
     const labelScale = clamp(scale * 0.55, NAME_LABEL_MIN_SCALE, NAME_LABEL_MAX_SCALE);
     entry.label.scale.set(NAME_LABEL_BASE_WIDTH * labelScale, NAME_LABEL_BASE_HEIGHT * labelScale, 1);
     entry.label.position.set(entry.current.x, entry.current.y + scale * 2.45 + 0.65 + labelScale * 0.25, entry.current.z);
     entry.label.lookAt(camera.position);
+    entry.label.visible = !dead;
     if (id === selfId) entry.shadow.material.opacity = 0.32;
+    if (dead) clearEatingEffect(entry.eatEffect);
+    else updateEatingEffect(entry, dt);
     animateWalk(entry, dt);
   }
 

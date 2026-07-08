@@ -1,5 +1,6 @@
 # Status
 
+- 2026-07-08 added escalating client unstuck recovery, delayed authoritative death/respawn after player consumption, eating sparkles, local eat/death toasts, and a shared kill-feed history box.
 - 2026-07-08 fixed wall chewing with client-side predictive removal of edible solid building/window blocks using server-matched eat reach, touch, and vertical-band checks, while keeping growth and confirmed consumption server-authoritative.
 - 2026-07-07 pass added client-side prediction, sprint stamina, walking animation, smaller starting scale, and in-game Exit to Lobby behavior.
 - First playable multiplayer prototype implemented.
