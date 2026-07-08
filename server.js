@@ -82,7 +82,7 @@ function playerHeight(size) {
 }
 
 function shadowRadius(size) {
-  return playerRadius(size) + 0.9 + size * 0.08;
+  return Math.pow(size, 0.45) * PLAYER_VISUAL_BASE_SCALE * 1.7 + 0.7;
 }
 
 function cellKey(x, z) {

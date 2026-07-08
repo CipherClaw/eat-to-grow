@@ -335,7 +335,7 @@ function makeNameSprite(text) {
   drawNameTag(ctx, c, text, 1);
   const texture = new THREE.CanvasTexture(c);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
-  sprite.scale.set(2.6, 0.65, 1);
+  sprite.scale.set(3.4, 0.85, 1);
   sprite.userData.canvas = c;
   sprite.userData.ctx = ctx;
   sprite.userData.texture = texture;
@@ -862,7 +862,7 @@ function animate() {
     entry.group.scale.setScalar(scale);
     entry.shadow.position.set(entry.current.x, 0.04, entry.current.z);
     entry.shadow.scale.setScalar(target.shadowRadius || 1);
-    entry.label.position.set(entry.current.x, entry.current.y + scale * 2.45 + 0.55, entry.current.z);
+    entry.label.position.set(entry.current.x, entry.current.y + scale * 2.45 + 0.65, entry.current.z);
     entry.label.lookAt(camera.position);
     if (id === selfId) entry.shadow.material.opacity = 0.32;
     animateWalk(entry, dt);
