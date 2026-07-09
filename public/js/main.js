@@ -132,6 +132,8 @@ const UNSTUCK_HARD_RECOVERY_SECONDS = 2.75;
 const UNSTUCK_PROGRESS_EPSILON = 0.015;
 const UNSTUCK_RECOVERY_MAX_STEP = 11.4;
 const UNSTUCK_OPEN_SCAN_STEP = 0.75;
+const UNSTUCK_EDGE_RECOVERY_MARGIN = 4;
+const UNSTUCK_EDGE_RECOVERY_STEP = 4;
 const EAT_PARTICLE_COUNT = 36;
 const EAT_PARTICLE_RATE = 34;
 const EAT_PARTICLE_LIFETIME = 0.75;
@@ -351,13 +353,14 @@ function supportHeightAt(size, y, x, z) {
 function findSameHeightRecovery(size, y, x, z) {
   const radius = playerRadius(size);
   const half = worldSize / 2;
+  const maxStep = Math.max(UNSTUCK_RECOVERY_MAX_STEP, radius * 4 + 8);
   const startX = clamp(x, -half + radius, half - radius);
   const startZ = clamp(z, -half + radius, half - radius);
   if (!collidesWithSolid(size, y, startX, startZ)) return { x: startX, y, z: startZ };
 
   let best = null;
   let bestDistance = Infinity;
-  for (let r = UNSTUCK_OPEN_SCAN_STEP; r <= UNSTUCK_RECOVERY_MAX_STEP; r += UNSTUCK_OPEN_SCAN_STEP) {
+  for (let r = UNSTUCK_OPEN_SCAN_STEP; r <= maxStep; r += UNSTUCK_OPEN_SCAN_STEP) {
     const samples = Math.max(12, Math.ceil(r * 10));
     for (let i = 0; i < samples; i++) {
       const angle = (i / samples) * Math.PI * 2 + r * 0.37;
@@ -375,9 +378,33 @@ function findSameHeightRecovery(size, y, x, z) {
   return best;
 }
 
+function findArenaRecovery(size) {
+  const radius = playerRadius(size);
+  const half = worldSize / 2;
+  const edge = half - radius - UNSTUCK_EDGE_RECOVERY_MARGIN;
+  for (let offset = -edge; offset <= edge; offset += UNSTUCK_EDGE_RECOVERY_STEP) {
+    const candidates = [
+      { x: offset, y: 0, z: -edge },
+      { x: edge, y: 0, z: offset },
+      { x: offset, y: 0, z: edge },
+      { x: -edge, y: 0, z: offset },
+    ];
+    for (const candidate of candidates) {
+      if (!collidesWithSolid(size, candidate.y, candidate.x, candidate.z)) return candidate;
+    }
+  }
+
+  for (let gx = -edge; gx <= edge; gx += UNSTUCK_EDGE_RECOVERY_STEP * 2) {
+    for (let gz = -edge; gz <= edge; gz += UNSTUCK_EDGE_RECOVERY_STEP * 2) {
+      if (!collidesWithSolid(size, 0, gx, gz)) return { x: gx, y: 0, z: gz };
+    }
+  }
+
+  return { x: -edge, y: 0, z: -edge };
+}
+
 function hardRecoverLocalPlayer() {
-  const recovery = findSameHeightRecovery(localSize, localPos.y, localPos.x, localPos.z);
-  if (!recovery) return;
+  const recovery = findSameHeightRecovery(localSize, localPos.y, localPos.x, localPos.z) || findArenaRecovery(localSize);
   localPos.x = recovery.x;
   localPos.y = recovery.y;
   localPos.z = recovery.z;

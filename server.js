@@ -12,7 +12,8 @@ const SNAPSHOT_RATE = 20;
 const DT = 1 / TICK_RATE;
 const WORLD_SIZE = 260;
 const HALF_WORLD = WORLD_SIZE / 2;
-const BLOCK_REGEN_MS = 25000;
+const BLOCK_REGEN_MS = 45000;
+const BLOCK_RESPAWN_RETRY_MS = 3000;
 const PLAYER_START_SIZE = 1;
 const MIN_PLAYER_SIZE = 0.75;
 const SHADOW_EAT_SECONDS = 3;
@@ -361,6 +362,15 @@ function consumeBlock(player, block) {
   }
 }
 
+function blockRespawnBlocked(block) {
+  for (const player of players.values()) {
+    if (player.dead) continue;
+    const clearRadius = playerRadius(player.size) + shadowRadius(player.size);
+    if (distance2d(player, block) <= clearRadius) return true;
+  }
+  return false;
+}
+
 function updateBlockEating(player) {
   if (player.dead) return;
   const radius = playerRadius(player.size);
@@ -481,6 +491,10 @@ function tick() {
 
   for (const block of blocks.values()) {
     if (!block.active && block.respawnAt <= now) {
+      if (blockRespawnBlocked(block)) {
+        block.respawnAt = now + BLOCK_RESPAWN_RETRY_MS;
+        continue;
+      }
       block.active = true;
       indexActiveBlock(block);
       io.emit("blockRespawned", serializeBlock(block));
