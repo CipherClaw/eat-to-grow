@@ -34,8 +34,8 @@ const hub = require("./profile.js").fromEnv(GAME_ID);
 const app = express();
 const server = http.createServer(app);
 const io = socketIO(server, {
-  pingTimeout: 6000,
-  pingInterval: 2500,
+  pingTimeout: 20000,
+  pingInterval: 5000,
   transports: ["websocket", "polling"],
 });
 
@@ -52,6 +52,7 @@ const buildingFootprints = new Map();
 let nextBlockId = 1;
 let nextBuildingId = 1;
 let snapshotAccumulator = 0;
+let tickTimer = null;
 
 function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
@@ -451,7 +452,6 @@ function blockRespawnBlocked(block, occupiedBuildings, now) {
     const footprint = buildingFootprints.get(block.buildingId);
     if (footprint && now < footprint.disturbedUntil) return true;
     if (occupiedBuildings.has(block.buildingId)) return true;
-    return false;
   }
 
   for (const player of players.values()) {
@@ -688,10 +688,46 @@ io.on("connection", (socket) => {
   });
 });
 
-generateArena();
-console.log(`Arena generated with ${blocks.size} blocks (max player size ${MAX_PLAYER_SIZE})`);
-setInterval(tick, 1000 / TICK_RATE);
+function startGameServer(port = PORT, host = HOST, callback) {
+  if (blocks.size === 0) {
+    generateArena();
+    console.log(`Arena generated with ${blocks.size} blocks (max player size ${MAX_PLAYER_SIZE})`);
+  }
+  if (!tickTimer) tickTimer = setInterval(tick, 1000 / TICK_RATE);
+  return server.listen(port, host, callback);
+}
 
-server.listen(PORT, HOST, () => {
-  console.log(`Eat To Grow server listening on ${HOST}:${PORT}`);
-});
+function stopGameServer(callback) {
+  if (tickTimer) {
+    clearInterval(tickTimer);
+    tickTimer = null;
+  }
+  io.close(() => {
+    if (!server.listening) {
+      if (callback) callback();
+      return;
+    }
+    server.close(callback);
+  });
+}
+
+if (require.main === module) {
+  startGameServer(PORT, HOST, () => {
+    console.log(`Eat To Grow server listening on ${HOST}:${PORT}`);
+  });
+}
+
+module.exports = {
+  app,
+  server,
+  io,
+  startGameServer,
+  stopGameServer,
+  _test: {
+    blockRespawnBlocked,
+    buildingFootprints,
+    playerRadius,
+    players,
+    shadowRadius,
+  },
+};

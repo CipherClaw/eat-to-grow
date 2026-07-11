@@ -18,6 +18,7 @@ const eatOverlayText = document.getElementById("eatOverlayText");
 const eatCountdown = document.getElementById("eatCountdown");
 const actionFeed = document.getElementById("actionFeed");
 const eatToast = document.getElementById("eatToast");
+const connectionToast = document.getElementById("connectionToast");
 const hubLinkStart = document.getElementById("hubLinkStart");
 const escHint = document.getElementById("escHint");
 const pauseMenu = document.getElementById("pauseMenu");
@@ -833,6 +834,7 @@ function setBlockActive(id, active) {
 }
 
 function handleSnapshot(snapshot) {
+  hideConnectionToast();
   for (const player of snapshot.players) upsertPlayer(player);
   for (const id of [...players.keys()]) {
     if (!snapshot.players.some((p) => p.id === id)) removePlayer(id);
@@ -851,6 +853,24 @@ function seedLocalPosition(player) {
   localVy = 0;
   yaw = Number.isFinite(player.yaw) ? player.yaw : yaw;
   localReady = true;
+}
+
+function rejoinFreshSession() {
+  localReady = false;
+  localDead = false;
+  localVy = 0;
+  resetUnstuckProgress();
+  socket.emit("hello", { glToken: identity.token, name: identity.name || "" });
+}
+
+function showConnectionToast() {
+  if (!connectionToast) return;
+  connectionToast.textContent = "Reconnecting...";
+  connectionToast.classList.remove("hidden");
+}
+
+function hideConnectionToast() {
+  connectionToast?.classList.add("hidden");
 }
 
 function renderHud(snapshot) {
@@ -1171,6 +1191,7 @@ exitLobbyButton?.addEventListener("click", () => {
   eatOverlay.classList.add("hidden");
   if (actionFeed) actionFeed.innerHTML = "";
   eatToast?.classList.add("hidden");
+  hideConnectionToast();
   startPanel.classList.remove("hidden");
   updateStaminaHud();
   startLobbyStatusPolling();
@@ -1205,6 +1226,7 @@ window.addEventListener("resize", () => {
 });
 
 socket.on("worldInit", (data) => {
+  hideConnectionToast();
   selfId = data.selfId;
   walletCoins = Number.isFinite(data.coins) ? data.coins : null;
   rebuildArena(data.worldSize);
@@ -1252,6 +1274,15 @@ socket.on("playerReset", (position) => {
 });
 socket.on("walletUpdate", (coins) => {
   walletCoins = coins;
+});
+
+socket.on("disconnect", () => {
+  if (joined) showConnectionToast();
+});
+
+socket.io.on("reconnect", () => {
+  if (!joined) return;
+  rejoinFreshSession();
 });
 
 setInterval(sendInput, 1000 / 30);

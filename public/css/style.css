@@ -160,6 +160,19 @@ body {
   font-weight: 800;
 }
 
+.connection-toast {
+  position: fixed;
+  left: 18px;
+  top: 58px;
+  padding: 8px 11px;
+  background: rgba(8, 12, 18, 0.78);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 6px;
+  color: #d8ecf8;
+  font-size: 13px;
+  font-weight: 800;
+}
+
 .leaderboard {
   position: fixed;
   right: 18px;
@@ -173,7 +186,7 @@ body {
 .action-feed {
   position: fixed;
   left: 18px;
-  top: 58px;
+  top: 96px;
   width: min(280px, calc(100vw - 36px));
   display: flex;
   flex-direction: column;
@@ -358,8 +371,13 @@ body {
 
   .action-feed {
     left: 10px;
-    top: 52px;
+    top: 86px;
     width: min(220px, calc(100vw - 20px));
+  }
+
+  .connection-toast {
+    left: 10px;
+    top: 52px;
   }
 
   .eat-toast {
