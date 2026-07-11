@@ -1,5 +1,6 @@
 # Status
 
+- 2026-07-11 raised the finite player size cap to 5000, synced visible head pitch across snapshots, added landmark-scale towers, and froze whole-building respawn while occupied or recently eaten.
 - 2026-07-11 rebuilt building interiors with fully filled edible floor slabs and coherent stair runs, raised the gameplay size limit from 60 to a 1000-unit safety ceiling, and retained bounded large-size freeze guards.
 - 2026-07-11 capped max player size at 60, bounded client camera/unstuck/pop-animation work to stop large-size freezes, and restyled the arena into lower-count cool glass shell towers.
 - 2026-07-11 polished bloxd.io parity with global rank name tags, a live player-count HUD pill, brighter denser city generation, vivid blue windows, and faster conservative growth pacing.

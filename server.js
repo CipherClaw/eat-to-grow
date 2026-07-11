@@ -16,7 +16,10 @@ const BLOCK_REGEN_MS = 45000;
 const BLOCK_RESPAWN_RETRY_MS = 3000;
 const PLAYER_START_SIZE = 1;
 const MIN_PLAYER_SIZE = 0.75;
-const MAX_PLAYER_SIZE = 1000;
+const MAX_PLAYER_SIZE = 5000;
+const MIN_LOOK_PITCH = -0.35;
+const MAX_LOOK_PITCH = 1.35;
+const DEFAULT_LOOK_PITCH = 0.18;
 const SHADOW_EAT_SECONDS = 3;
 const RESPAWN_DELAY_MS = 2200;
 const FLOOR_SPACING = 10;
@@ -45,7 +48,9 @@ app.get("/api/status", (_req, res) => {
 const players = new Map();
 const blocks = new Map();
 const activeBlockCells = new Map();
+const buildingFootprints = new Map();
 let nextBlockId = 1;
+let nextBuildingId = 1;
 let snapshotAccumulator = 0;
 
 function clamp(value, min, max) {
@@ -143,7 +148,7 @@ function blocksNear(index, x, z, radius) {
   return found;
 }
 
-function addBlock(x, y, z, kind, color, value = 0.1) {
+function addBlock(x, y, z, kind, color, value = 0.1, buildingId = null) {
   const id = nextBlockId++;
   const block = {
     id,
@@ -156,6 +161,7 @@ function addBlock(x, y, z, kind, color, value = 0.1) {
     value,
     active: true,
     respawnAt: 0,
+    buildingId,
   };
   blocks.set(id, block);
   indexActiveBlock(block);
@@ -165,6 +171,8 @@ function addBlock(x, y, z, kind, color, value = 0.1) {
 function addVoxelWall(cx, cz, width, depth, floors, color, accentColor = "#6f8792") {
   const halfW = Math.floor(width / 2);
   const halfD = Math.floor(depth / 2);
+  const buildingId = nextBuildingId++;
+  buildingFootprints.set(buildingId, { cx, cz, halfW, halfD, disturbedUntil: 0 });
   const glassColors = ["#9ff6ff", "#54d9e8", "#b7fff0"];
   for (let level = 0; level < floors; level++) {
     for (let x = -halfW; x <= halfW; x++) {
@@ -178,7 +186,7 @@ function addVoxelWall(cx, cz, width, depth, floors, color, accentColor = "#6f879
         const accentBand = !windowStrip && level > 0 && level % 5 === 0;
         const kind = windowStrip ? "window" : "building";
         const blockColor = windowStrip ? glassColors[(level + facadeOffset) % glassColors.length] : (accentBand ? accentColor : color);
-        addBlock(cx + x, level + 0.5, cz + z, kind, blockColor, 0.09);
+        addBlock(cx + x, level + 0.5, cz + z, kind, blockColor, 0.09, buildingId);
       }
     }
   }
@@ -187,7 +195,7 @@ function addVoxelWall(cx, cz, width, depth, floors, color, accentColor = "#6f879
     const y = top - 0.5;
     for (let x = -halfW + 1; x <= halfW - 1; x++) {
       for (let z = -halfD + 1; z <= halfD - 1; z++) {
-        addBlock(cx + x, y, cz + z, "building", accentColor, 0.063);
+        addBlock(cx + x, y, cz + z, "building", accentColor, 0.063, buildingId);
       }
     }
   }
@@ -215,7 +223,7 @@ function addVoxelWall(cx, cz, width, depth, floors, color, accentColor = "#6f879
     const [x, z] = stairPath[(level - 1) % stairPath.length];
     const stairX = clamp(x, -halfW + 1, halfW - 1);
     const stairZ = clamp(z, -halfD + 1, halfD - 1);
-    addBlock(cx + stairX, level + 0.5, cz + stairZ, "building", accentColor, 0.054);
+    addBlock(cx + stairX, level + 0.5, cz + stairZ, "building", accentColor, 0.054, buildingId);
   }
 }
 
@@ -244,6 +252,9 @@ function generateArena() {
     [108, 78, 11, 16, 10, "#294753", "#83d9e0"],
     [-102, -18, 11, 14, 12, "#edf0e6", "#689da8"],
     [-24, -38, 12, 11, 13, "#36515d", "#94e6e8"],
+    [-86, -52, 30, 28, 42, "#1d3443", "#78f1ff"],
+    [-84, 104, 28, 26, 40, "#e6f2f1", "#41c7d4"],
+    [84, 106, 30, 26, 44, "#2a5361", "#a8fff4"],
   ];
   for (const b of buildings) addVoxelWall(...b);
 
@@ -273,6 +284,7 @@ function serializePlayer(player, rank) {
     y: player.y,
     z: player.z,
     yaw: player.yaw,
+    pitch: player.pitch,
     size: player.size,
     color: player.color,
     shadowRadius: shadowRadius(player.size),
@@ -336,6 +348,7 @@ function makePlayer(socket, name, hubProfile) {
     z: spawn.z,
     vy: 0,
     yaw: 0,
+    pitch: DEFAULT_LOOK_PITCH,
     size: PLAYER_START_SIZE,
     color: `hsl(${Math.floor(Math.random() * 360)} 72% 56%)`,
     input: { yaw: 0, run: false, jump: false },
@@ -394,9 +407,14 @@ function maybeReportProgress(player, reason) {
 }
 
 function consumeBlock(player, block) {
+  const now = Date.now();
   unindexActiveBlock(block);
   block.active = false;
-  block.respawnAt = Date.now() + BLOCK_REGEN_MS + Math.random() * 15000;
+  block.respawnAt = now + BLOCK_REGEN_MS + Math.random() * 15000;
+  if (block.buildingId) {
+    const footprint = buildingFootprints.get(block.buildingId);
+    if (footprint) footprint.disturbedUntil = now + BLOCK_REGEN_MS;
+  }
   player.size += block.value;
   capPlayerSize(player);
   player.blocksEaten += 1;
@@ -411,7 +429,31 @@ function consumeBlock(player, block) {
   }
 }
 
-function blockRespawnBlocked(block) {
+function occupiedBuildingIds() {
+  const occupied = new Set();
+  const margin = 1.5;
+  for (const player of players.values()) {
+    if (player.dead) continue;
+    const radius = playerRadius(player.size) + margin;
+    for (const [buildingId, footprint] of buildingFootprints) {
+      if (player.x < footprint.cx - footprint.halfW - radius) continue;
+      if (player.x > footprint.cx + footprint.halfW + radius) continue;
+      if (player.z < footprint.cz - footprint.halfD - radius) continue;
+      if (player.z > footprint.cz + footprint.halfD + radius) continue;
+      occupied.add(buildingId);
+    }
+  }
+  return occupied;
+}
+
+function blockRespawnBlocked(block, occupiedBuildings, now) {
+  if (block.buildingId) {
+    const footprint = buildingFootprints.get(block.buildingId);
+    if (footprint && now < footprint.disturbedUntil) return true;
+    if (occupiedBuildings.has(block.buildingId)) return true;
+    return false;
+  }
+
   for (const player of players.values()) {
     if (player.dead) continue;
     const clearRadius = playerRadius(player.size) + shadowRadius(player.size);
@@ -540,9 +582,10 @@ function tick() {
   }
   updatePlayerEating();
 
+  const occupiedBuildings = occupiedBuildingIds();
   for (const block of blocks.values()) {
     if (!block.active && block.respawnAt <= now) {
-      if (blockRespawnBlocked(block)) {
+      if (blockRespawnBlocked(block, occupiedBuildings, now)) {
         block.respawnAt = now + BLOCK_RESPAWN_RETRY_MS;
         continue;
       }
@@ -565,6 +608,7 @@ function applyClientPosition(player, input) {
   let y = Number(input.y);
   let z = Number(input.z);
   const yaw = Number(input.yaw);
+  const pitch = Number(input.pitch);
   const vy = Number(input.vy);
 
   if (!Number.isFinite(x)) x = player.x;
@@ -590,6 +634,7 @@ function applyClientPosition(player, input) {
   player.y = y;
   player.z = z;
   player.yaw = Number.isFinite(yaw) ? yaw : player.yaw;
+  player.pitch = Number.isFinite(pitch) ? clamp(pitch, MIN_LOOK_PITCH, MAX_LOOK_PITCH) : player.pitch;
   player.vy = Number.isFinite(vy) ? vy : player.vy;
   player.input = {
     yaw: player.yaw,

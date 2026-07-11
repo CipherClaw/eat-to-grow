@@ -117,6 +117,9 @@ const FLOOR_SPACING = 10;
 const GROUND_EPSILON = 0.08;
 const STEP_TOLERANCE = 0.34;
 const PLAYER_VISUAL_BASE_SCALE = 0.55;
+const DEFAULT_LOOK_PITCH = 0.18;
+const MIN_HEAD_TILT = -0.6;
+const MAX_HEAD_TILT = 0.7;
 const SPRINT_DRAIN_PER_SECOND = 0.34;
 const SPRINT_RECHARGE_PER_SECOND = 0.24;
 const SPRINT_MIN_CHARGE_TO_START = 0.18;
@@ -683,10 +686,14 @@ function createPlayerMesh(player) {
 
   const body = new THREE.Mesh(new THREE.BoxGeometry(0.8, 1, 0.45), bodyMat);
   body.position.y = 1.05;
+  const headPivot = new THREE.Group();
+  headPivot.position.y = 1.55;
   const head = new THREE.Mesh(new THREE.BoxGeometry(0.65, 0.65, 0.65), skinMat);
-  head.position.y = 1.88;
+  head.position.y = 0.33;
   const hair = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.22, 0.72), hairMat);
-  hair.position.y = 2.25;
+  hair.position.y = 0.7;
+  headPivot.add(head);
+  headPivot.add(hair);
   const legL = new THREE.Mesh(new THREE.BoxGeometry(0.28, 0.8, 0.32), pantsMat);
   legL.position.set(-0.22, 0.4, 0);
   const legR = legL.clone();
@@ -698,8 +705,13 @@ function createPlayerMesh(player) {
   for (const part of [body, head, hair, legL, legR, armL, armR]) {
     part.castShadow = true;
     part.receiveShadow = true;
-    group.add(part);
   }
+  group.add(body);
+  group.add(headPivot);
+  group.add(legL);
+  group.add(legR);
+  group.add(armL);
+  group.add(armR);
 
   const shadow = new THREE.Mesh(
     new THREE.CircleGeometry(1, 40),
@@ -716,6 +728,7 @@ function createPlayerMesh(player) {
   return {
     group,
     body,
+    headPivot,
     legL,
     legR,
     armL,
@@ -723,7 +736,7 @@ function createPlayerMesh(player) {
     shadow,
     label,
     eatEffect: createEatingEffect(),
-    current: { x: player.x, y: player.y || 0, z: player.z, yaw: player.yaw, size: player.size },
+    current: { x: player.x, y: player.y || 0, z: player.z, yaw: player.yaw, pitch: player.pitch ?? DEFAULT_LOOK_PITCH, size: player.size },
     previous: { x: player.x, y: player.y || 0, z: player.z },
     walkPhase: 0,
     target: player,
@@ -907,6 +920,7 @@ function sendInput() {
     y: localPos.y,
     z: localPos.z,
     yaw,
+    pitch,
     vy: localVy,
     run: isSprintingNow(),
     jump: keys.has("Space"),
@@ -1262,17 +1276,21 @@ function animate() {
       entry.current.y = localPos.y;
       entry.current.z = localPos.z;
       entry.current.yaw = yaw;
+      entry.current.pitch = pitch;
     } else {
       entry.current.x += (target.x - entry.current.x) * 0.35;
       entry.current.y += ((target.y || 0) - entry.current.y) * 0.35;
       entry.current.z += (target.z - entry.current.z) * 0.35;
       entry.current.yaw += normalizeAngle(target.yaw - entry.current.yaw) * 0.35;
+      entry.current.pitch += (((target.pitch ?? DEFAULT_LOOK_PITCH) - entry.current.pitch) * 0.35);
     }
     entry.current.size += (target.size - entry.current.size) * 0.18;
+    const headAngle = clamp((entry.current.pitch - DEFAULT_LOOK_PITCH) * 0.8, MIN_HEAD_TILT, MAX_HEAD_TILT);
     const scale = playerScale(entry.current.size);
     const dead = Boolean(target.dead);
     entry.group.position.set(entry.current.x, entry.current.y, entry.current.z);
     entry.group.rotation.y = entry.current.yaw;
+    entry.headPivot.rotation.x = headAngle;
     entry.group.scale.setScalar(scale);
     entry.group.visible = !dead;
     entry.shadow.position.set(entry.current.x, 0.04, entry.current.z);
