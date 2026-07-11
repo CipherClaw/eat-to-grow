@@ -142,6 +142,7 @@ const EAT_PARTICLE_RATE = 34;
 const EAT_PARTICLE_LIFETIME = 0.75;
 const CAMERA_OCCLUSION_MIN_STANDOFF = 2.8;
 const CAMERA_OCCLUSION_MAX_BLOCK_CANDIDATES = 120;
+const CAMERA_OCCLUSION_MAX_QUERY_RADIUS = 80;
 
 const eatParticleMaterial = new THREE.PointsMaterial({
   size: 0.28,
@@ -1340,7 +1341,7 @@ function resolveCameraOcclusion(eye, desiredCamera, cameraDistance, playerPos, m
   cameraRaycaster.far = rayLength;
 
   cameraHitCandidates.length = 0;
-  const maxBlockDistance = cameraDistance + 4;
+  const maxBlockDistance = Math.min(cameraDistance + 4, CAMERA_OCCLUSION_MAX_QUERY_RADIUS);
   const maxBlockDistanceSq = maxBlockDistance * maxBlockDistance;
   const nearestBlocks = [];
   for (const block of blocksNear(solidBlockCells, playerPos.x, playerPos.z, maxBlockDistance)) {

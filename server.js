@@ -16,7 +16,7 @@ const BLOCK_REGEN_MS = 45000;
 const BLOCK_RESPAWN_RETRY_MS = 3000;
 const PLAYER_START_SIZE = 1;
 const MIN_PLAYER_SIZE = 0.75;
-const MAX_PLAYER_SIZE = 60;
+const MAX_PLAYER_SIZE = 1000;
 const SHADOW_EAT_SECONDS = 3;
 const RESPAWN_DELAY_MS = 2200;
 const FLOOR_SPACING = 10;
@@ -185,27 +185,37 @@ function addVoxelWall(cx, cz, width, depth, floors, color, accentColor = "#6f879
 
   for (let top = FLOOR_SPACING; top < floors; top += FLOOR_SPACING) {
     const y = top - 0.5;
-    for (let x = -halfW + 2; x <= halfW - 2; x += 2) {
-      addBlock(cx + x, y, cz, "building", accentColor, 0.063);
-    }
-    for (let z = -halfD + 2; z <= halfD - 2; z += 2) {
-      addBlock(cx, y, cz + z, "building", accentColor, 0.063);
+    for (let x = -halfW + 1; x <= halfW - 1; x++) {
+      for (let z = -halfD + 1; z <= halfD - 1; z++) {
+        addBlock(cx + x, y, cz + z, "building", accentColor, 0.063);
+      }
     }
   }
 
-  const stairs = [
-    [-1, -1],
-    [0, -1],
-    [1, -1],
-    [1, 0],
-    [1, 1],
-    [0, 1],
-    [-1, 1],
-    [-1, 0],
+  const stairPath = [
+    [-2, -2],
+    [-1, -2],
+    [0, -2],
+    [1, -2],
+    [2, -2],
+    [2, -1],
+    [2, 0],
+    [2, 1],
+    [2, 2],
+    [1, 2],
+    [0, 2],
+    [-1, 2],
+    [-2, 2],
+    [-2, 1],
+    [-2, 0],
+    [-2, -1],
   ];
-  for (let step = 0; step < floors; step += 2) {
-    const [x, z] = stairs[step % stairs.length];
-    addBlock(cx + x, step + 0.5, cz + z, "building", accentColor, 0.054);
+  for (let level = 1; level < floors - 1; level++) {
+    if ((level + 1) % FLOOR_SPACING === 0) continue;
+    const [x, z] = stairPath[(level - 1) % stairPath.length];
+    const stairX = clamp(x, -halfW + 1, halfW - 1);
+    const stairZ = clamp(z, -halfD + 1, halfD - 1);
+    addBlock(cx + stairX, level + 0.5, cz + stairZ, "building", accentColor, 0.054);
   }
 }
 
