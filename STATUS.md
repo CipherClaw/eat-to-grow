@@ -1,5 +1,6 @@
 # Status
 
+- 2026-07-11 capped max player size at 60, bounded client camera/unstuck/pop-animation work to stop large-size freezes, and restyled the arena into lower-count cool glass shell towers.
 - 2026-07-11 polished bloxd.io parity with global rank name tags, a live player-count HUD pill, brighter denser city generation, vivid blue windows, and faster conservative growth pacing.
 - 2026-07-08 fixed client wall-growth overlap recovery so enlarged or respawn-overlapped players keep sliding/steering, get only a gentle depenetration nudge, and no longer teleport upward.
 - 2026-07-08 added escalating client unstuck recovery, delayed authoritative death/respawn after player consumption, eating sparkles, local eat/death toasts, and a shared kill-feed history box.

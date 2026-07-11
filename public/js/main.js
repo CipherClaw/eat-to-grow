@@ -52,6 +52,7 @@ let stuckBestPenetration = Infinity;
 
 const keys = new Set();
 const blocks = new Map();
+const poppingBlocks = new Set();
 const solidBlockCells = new Map();
 const predictedBlockEats = new Map();
 const players = new Map();
@@ -101,13 +102,13 @@ scene.add(wallGroup);
 const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
 const materialCache = new Map();
 const windowMaterial = new THREE.MeshStandardMaterial({
-  color: "#65d9ff",
+  color: "#8cf8ff",
   transparent: true,
-  opacity: 0.86,
-  roughness: 0.12,
+  opacity: 0.9,
+  roughness: 0.08,
   metalness: 0.02,
-  emissive: "#28bfff",
-  emissiveIntensity: 0.28,
+  emissive: "#20d8cc",
+  emissiveIntensity: 0.34,
 });
 
 const GRAVITY = 22;
@@ -133,12 +134,14 @@ const UNSTUCK_HARD_RECOVERY_SECONDS = 2.75;
 const UNSTUCK_PROGRESS_EPSILON = 0.015;
 const UNSTUCK_RECOVERY_MAX_STEP = 11.4;
 const UNSTUCK_OPEN_SCAN_STEP = 0.75;
+const UNSTUCK_RECOVERY_MAX_COLLISION_SAMPLES = 2400;
 const UNSTUCK_EDGE_RECOVERY_MARGIN = 4;
 const UNSTUCK_EDGE_RECOVERY_STEP = 4;
 const EAT_PARTICLE_COUNT = 36;
 const EAT_PARTICLE_RATE = 34;
 const EAT_PARTICLE_LIFETIME = 0.75;
 const CAMERA_OCCLUSION_MIN_STANDOFF = 2.8;
+const CAMERA_OCCLUSION_MAX_BLOCK_CANDIDATES = 120;
 
 const eatParticleMaterial = new THREE.PointsMaterial({
   size: 0.28,
@@ -361,9 +364,12 @@ function findSameHeightRecovery(size, y, x, z) {
 
   let best = null;
   let bestDistance = Infinity;
+  let collisionSamples = 1;
   for (let r = UNSTUCK_OPEN_SCAN_STEP; r <= maxStep; r += UNSTUCK_OPEN_SCAN_STEP) {
     const samples = Math.max(12, Math.ceil(r * 10));
     for (let i = 0; i < samples; i++) {
+      collisionSamples += 1;
+      if (collisionSamples > UNSTUCK_RECOVERY_MAX_COLLISION_SAMPLES) return null;
       const angle = (i / samples) * Math.PI * 2 + r * 0.37;
       const cx = clamp(x + Math.cos(angle) * r, -half + radius, half - radius);
       const cz = clamp(z + Math.sin(angle) * r, -half + radius, half - radius);
@@ -764,6 +770,8 @@ function createBlock(block) {
     existing.position.set(block.x, block.y, block.z);
     existing.visible = block.active;
     existing.userData.kind = block.kind;
+    existing.scale.setScalar(1);
+    poppingBlocks.delete(existing);
     addToSolidIndex(blockData);
     return;
   }
@@ -798,9 +806,14 @@ function setBlockActive(id, active) {
   removeFromSolidIndex(block);
   block.active = active;
   mesh.visible = active;
+  if (!active) {
+    poppingBlocks.delete(mesh);
+    return;
+  }
   if (active) {
     mesh.scale.setScalar(0.01);
     mesh.userData.pop = 0;
+    poppingBlocks.add(mesh);
     addToSolidIndex(block);
   }
 }
@@ -1275,10 +1288,16 @@ function animate() {
     animateWalk(entry, dt);
   }
 
-  for (const mesh of blocks.values()) {
-    if (mesh.userData.pop !== undefined && mesh.scale.x < 1) {
-      const s = Math.min(1, mesh.scale.x + 0.08);
-      mesh.scale.setScalar(s);
+  for (const mesh of poppingBlocks) {
+    if (!mesh.visible) {
+      poppingBlocks.delete(mesh);
+      continue;
+    }
+    const s = Math.min(1, mesh.scale.x + 0.08);
+    mesh.scale.setScalar(s);
+    if (s >= 1) {
+      delete mesh.userData.pop;
+      poppingBlocks.delete(mesh);
     }
   }
 
@@ -1322,10 +1341,21 @@ function resolveCameraOcclusion(eye, desiredCamera, cameraDistance, playerPos, m
 
   cameraHitCandidates.length = 0;
   const maxBlockDistance = cameraDistance + 4;
-  for (const mesh of blocks.values()) {
-    if (!mesh.visible || (mesh.userData.kind !== "building" && mesh.userData.kind !== "window")) continue;
-    if (Math.hypot(mesh.position.x - playerPos.x, mesh.position.z - playerPos.z) > maxBlockDistance) continue;
-    cameraHitCandidates.push(mesh);
+  const maxBlockDistanceSq = maxBlockDistance * maxBlockDistance;
+  const nearestBlocks = [];
+  for (const block of blocksNear(solidBlockCells, playerPos.x, playerPos.z, maxBlockDistance)) {
+    if (!block.active) continue;
+    const mesh = blocks.get(block.id);
+    if (!mesh?.visible) continue;
+    const dx = block.x - playerPos.x;
+    const dz = block.z - playerPos.z;
+    const distanceSq = dx * dx + dz * dz;
+    if (distanceSq > maxBlockDistanceSq) continue;
+    nearestBlocks.push({ mesh, distanceSq });
+  }
+  nearestBlocks.sort((a, b) => a.distanceSq - b.distanceSq);
+  for (let i = 0; i < Math.min(nearestBlocks.length, CAMERA_OCCLUSION_MAX_BLOCK_CANDIDATES); i++) {
+    cameraHitCandidates.push(nearestBlocks[i].mesh);
   }
   for (const wall of wallGroup.children) cameraHitCandidates.push(wall);
 

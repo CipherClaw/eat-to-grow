@@ -16,6 +16,7 @@ const BLOCK_REGEN_MS = 45000;
 const BLOCK_RESPAWN_RETRY_MS = 3000;
 const PLAYER_START_SIZE = 1;
 const MIN_PLAYER_SIZE = 0.75;
+const MAX_PLAYER_SIZE = 60;
 const SHADOW_EAT_SECONDS = 3;
 const RESPAWN_DELAY_MS = 2200;
 const FLOOR_SPACING = 10;
@@ -88,6 +89,10 @@ function shadowRadius(size) {
   return Math.pow(size, 0.45) * PLAYER_VISUAL_BASE_SCALE * 1.7 + 0.7;
 }
 
+function capPlayerSize(player) {
+  player.size = Math.min(player.size, MAX_PLAYER_SIZE);
+}
+
 function cellKey(x, z) {
   return `${Math.floor(x)},${Math.floor(z)}`;
 }
@@ -157,32 +162,37 @@ function addBlock(x, y, z, kind, color, value = 0.1) {
   return block;
 }
 
-function addVoxelWall(cx, cz, width, depth, floors, color) {
+function addVoxelWall(cx, cz, width, depth, floors, color, accentColor = "#6f8792") {
   const halfW = Math.floor(width / 2);
   const halfD = Math.floor(depth / 2);
-  const windowColor = "#6ed8ff";
+  const glassColors = ["#9ff6ff", "#54d9e8", "#b7fff0"];
   for (let level = 0; level < floors; level++) {
     for (let x = -halfW; x <= halfW; x++) {
       for (let z = -halfD; z <= halfD; z++) {
         const edge = x === -halfW || x === halfW || z === -halfD || z === halfD;
         if (!edge) continue;
-        const nearCorner = (Math.abs(x) === halfW && Math.abs(z) >= halfD - 1) || (Math.abs(z) === halfD && Math.abs(x) >= halfW - 1);
-        const upperFloor = level >= 2;
-        const windowPattern = upperFloor && !nearCorner && ((x * 3 + z * 5 + level) % 4 === 0 || (level % 3 === 0 && (x + z) % 3 === 0));
-        const kind = windowPattern ? "window" : "building";
-        addBlock(cx + x, level + 0.5, cz + z, kind, windowPattern ? windowColor : color, 0.09);
+        const corner = Math.abs(x) === halfW && Math.abs(z) === halfD;
+        const structuralBand = level === 0 || level === floors - 1 || level % 5 === 0;
+        const facadeOffset = Math.abs(x) === halfW ? z + halfD : x + halfW;
+        const windowStrip = level >= 2 && !corner && !structuralBand && facadeOffset % 3 !== 0;
+        const accentBand = !windowStrip && level > 0 && level % 5 === 0;
+        const kind = windowStrip ? "window" : "building";
+        const blockColor = windowStrip ? glassColors[(level + facadeOffset) % glassColors.length] : (accentBand ? accentColor : color);
+        addBlock(cx + x, level + 0.5, cz + z, kind, blockColor, 0.09);
       }
     }
   }
-  for (let top = FLOOR_SPACING; top <= floors; top += FLOOR_SPACING) {
+
+  for (let top = FLOOR_SPACING; top < floors; top += FLOOR_SPACING) {
     const y = top - 0.5;
-    for (let x = -halfW + 1; x <= halfW - 1; x++) {
-      for (let z = -halfD + 1; z <= halfD - 1; z++) {
-        const stairwell = Math.abs(x) <= 1 && Math.abs(z) <= 1;
-        if (!stairwell) addBlock(cx + x, y, cz + z, "building", color, 0.063);
-      }
+    for (let x = -halfW + 2; x <= halfW - 2; x += 2) {
+      addBlock(cx + x, y, cz, "building", accentColor, 0.063);
+    }
+    for (let z = -halfD + 2; z <= halfD - 2; z += 2) {
+      addBlock(cx, y, cz + z, "building", accentColor, 0.063);
     }
   }
+
   const stairs = [
     [-1, -1],
     [0, -1],
@@ -193,9 +203,9 @@ function addVoxelWall(cx, cz, width, depth, floors, color) {
     [-1, 1],
     [-1, 0],
   ];
-  for (let step = 0; step < floors; step++) {
+  for (let step = 0; step < floors; step += 2) {
     const [x, z] = stairs[step % stairs.length];
-    addBlock(cx + x, step + 0.5, cz + z, "building", color, 0.054);
+    addBlock(cx + x, step + 0.5, cz + z, "building", accentColor, 0.054);
   }
 }
 
@@ -210,22 +220,20 @@ function addTree(cx, cz) {
 
 function generateArena() {
   const buildings = [
-    [-104, -88, 16, 18, 18, "#d95a45"],
-    [-58, -98, 20, 14, 30, "#e0a06a"],
-    [10, -94, 17, 19, 24, "#f0755d"],
-    [80, -84, 19, 17, 38, "#d94b42"],
-    [106, -24, 14, 22, 20, "#f08b62"],
-    [58, 28, 22, 18, 42, "#efb079"],
-    [2, 14, 18, 16, 28, "#d86b55"],
-    [-60, 30, 17, 22, 24, "#eda064"],
-    [-108, 82, 16, 16, 14, "#e7503f"],
-    [-28, 102, 21, 15, 34, "#d99262"],
-    [48, 100, 18, 18, 30, "#f26e55"],
-    [108, 78, 16, 20, 18, "#dc6a4d"],
-    [-100, -18, 14, 18, 22, "#f19b59"],
-    [-24, -36, 16, 14, 26, "#e65f4d"],
-    [34, -34, 14, 16, 24, "#eab06c"],
-    [94, 36, 15, 15, 24, "#f36f57"],
+    [-104, -88, 12, 14, 11, "#455d68", "#8aa3ad"],
+    [-54, -98, 15, 11, 16, "#233f4b", "#58a8b4"],
+    [12, -92, 12, 16, 13, "#e7ece8", "#65b2bd"],
+    [78, -82, 14, 12, 18, "#2f5663", "#a8f0ef"],
+    [106, -22, 11, 17, 12, "#f3f2e8", "#6aa7b0"],
+    [58, 30, 16, 13, 19, "#344a57", "#88c9d0"],
+    [0, 16, 13, 12, 14, "#dfe6e2", "#4aa5ad"],
+    [-60, 34, 12, 17, 12, "#253946", "#78d7df"],
+    [-108, 84, 13, 13, 9, "#e9ede6", "#71aeb5"],
+    [-30, 102, 16, 11, 17, "#3f5f6d", "#9ee8ea"],
+    [48, 100, 13, 14, 15, "#eef2ea", "#52bac4"],
+    [108, 78, 11, 16, 10, "#294753", "#83d9e0"],
+    [-102, -18, 11, 14, 12, "#edf0e6", "#689da8"],
+    [-24, -38, 12, 11, 13, "#36515d", "#94e6e8"],
   ];
   for (const b of buildings) addVoxelWall(...b);
 
@@ -380,6 +388,7 @@ function consumeBlock(player, block) {
   block.active = false;
   block.respawnAt = Date.now() + BLOCK_REGEN_MS + Math.random() * 15000;
   player.size += block.value;
+  capPlayerSize(player);
   player.blocksEaten += 1;
   player.unreportedBlocks += 1;
   player.bestSize = Math.max(player.bestSize, player.size);
@@ -477,6 +486,7 @@ function updatePlayerEating() {
     const actualDrain = Math.min(drain, Math.max(0, victim.size - MIN_PLAYER_SIZE));
     victim.size -= actualDrain;
     activePredator.size += actualDrain * 0.85;
+    capPlayerSize(activePredator);
     activePredator.bestSize = Math.max(activePredator.bestSize, activePredator.size);
     victim.eatenBy = activePredator.id;
     victim.eatCountdown = remaining;
@@ -484,6 +494,7 @@ function updatePlayerEating() {
     if (remaining <= 0) {
       const absorbed = Math.max(0.5, victim.size * 0.45);
       activePredator.size += absorbed;
+      capPlayerSize(activePredator);
       activePredator.playersEaten += 1;
       activePredator.pendingPlayersEaten = (activePredator.pendingPlayersEaten || 0) + 1;
       activePredator.pendingPlayerCoins = (activePredator.pendingPlayerCoins || 0) + 8;
@@ -623,6 +634,7 @@ io.on("connection", (socket) => {
 });
 
 generateArena();
+console.log(`Arena generated with ${blocks.size} blocks (max player size ${MAX_PLAYER_SIZE})`);
 setInterval(tick, 1000 / TICK_RATE);
 
 server.listen(PORT, HOST, () => {
