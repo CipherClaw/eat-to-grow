@@ -148,10 +148,22 @@ body {
   font-weight: 700;
 }
 
-.leaderboard {
+.player-count {
   position: fixed;
   right: 18px;
   top: 58px;
+  padding: 7px 11px;
+  background: rgba(8, 12, 18, 0.66);
+  border-radius: 999px;
+  color: #d8ecf8;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.leaderboard {
+  position: fixed;
+  right: 18px;
+  top: 92px;
   width: 250px;
   padding: 12px;
   background: rgba(8, 12, 18, 0.66);
@@ -328,6 +340,12 @@ body {
   .leaderboard {
     width: 190px;
     right: 10px;
+    top: 88px;
+  }
+
+  .player-count {
+    right: 10px;
+    top: 54px;
   }
 
   .size-readout {

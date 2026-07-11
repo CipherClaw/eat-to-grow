@@ -138,7 +138,7 @@ function blocksNear(index, x, z, radius) {
   return found;
 }
 
-function addBlock(x, y, z, kind, color, value = 0.055) {
+function addBlock(x, y, z, kind, color, value = 0.1) {
   const id = nextBlockId++;
   const block = {
     id,
@@ -160,17 +160,17 @@ function addBlock(x, y, z, kind, color, value = 0.055) {
 function addVoxelWall(cx, cz, width, depth, floors, color) {
   const halfW = Math.floor(width / 2);
   const halfD = Math.floor(depth / 2);
-  const windowColor = "#bfe4f5";
+  const windowColor = "#6ed8ff";
   for (let level = 0; level < floors; level++) {
     for (let x = -halfW; x <= halfW; x++) {
       for (let z = -halfD; z <= halfD; z++) {
         const edge = x === -halfW || x === halfW || z === -halfD || z === halfD;
         if (!edge) continue;
         const nearCorner = (Math.abs(x) === halfW && Math.abs(z) >= halfD - 1) || (Math.abs(z) === halfD && Math.abs(x) >= halfW - 1);
-        const upperFloor = level >= 2 && level % 2 === 0;
-        const windowPattern = upperFloor && !nearCorner && ((x * 3 + z * 5 + level) % 7 === 0);
+        const upperFloor = level >= 2;
+        const windowPattern = upperFloor && !nearCorner && ((x * 3 + z * 5 + level) % 4 === 0 || (level % 3 === 0 && (x + z) % 3 === 0));
         const kind = windowPattern ? "window" : "building";
-        addBlock(cx + x, level + 0.5, cz + z, kind, windowPattern ? windowColor : color, 0.05);
+        addBlock(cx + x, level + 0.5, cz + z, kind, windowPattern ? windowColor : color, 0.09);
       }
     }
   }
@@ -179,7 +179,7 @@ function addVoxelWall(cx, cz, width, depth, floors, color) {
     for (let x = -halfW + 1; x <= halfW - 1; x++) {
       for (let z = -halfD + 1; z <= halfD - 1; z++) {
         const stairwell = Math.abs(x) <= 1 && Math.abs(z) <= 1;
-        if (!stairwell) addBlock(cx + x, y, cz + z, "building", color, 0.035);
+        if (!stairwell) addBlock(cx + x, y, cz + z, "building", color, 0.063);
       }
     }
   }
@@ -195,37 +195,41 @@ function addVoxelWall(cx, cz, width, depth, floors, color) {
   ];
   for (let step = 0; step < floors; step++) {
     const [x, z] = stairs[step % stairs.length];
-    addBlock(cx + x, step + 0.5, cz + z, "building", color, 0.03);
+    addBlock(cx + x, step + 0.5, cz + z, "building", color, 0.054);
   }
 }
 
 function addTree(cx, cz) {
-  addBlock(cx, 0.5, cz, "prop", "#775136", 0.04);
-  addBlock(cx, 1.5, cz, "prop", "#2f8b46", 0.045);
-  addBlock(cx + 1, 1.5, cz, "prop", "#3ba95a", 0.045);
-  addBlock(cx - 1, 1.5, cz, "prop", "#3ba95a", 0.045);
-  addBlock(cx, 1.5, cz + 1, "prop", "#49b766", 0.045);
-  addBlock(cx, 2.5, cz, "prop", "#2f8b46", 0.055);
+  addBlock(cx, 0.5, cz, "prop", "#875335", 0.072);
+  addBlock(cx, 1.5, cz, "prop", "#2f9a46", 0.081);
+  addBlock(cx + 1, 1.5, cz, "prop", "#40ba5f", 0.081);
+  addBlock(cx - 1, 1.5, cz, "prop", "#40ba5f", 0.081);
+  addBlock(cx, 1.5, cz + 1, "prop", "#55ca70", 0.081);
+  addBlock(cx, 2.5, cz, "prop", "#2f9a46", 0.1);
 }
 
 function generateArena() {
   const buildings = [
-    [-104, -88, 16, 18, 18, "#a65a47"],
-    [-58, -98, 20, 14, 30, "#b18470"],
-    [10, -94, 17, 19, 24, "#9a7860"],
-    [80, -84, 19, 17, 38, "#b86a4f"],
-    [106, -24, 14, 22, 20, "#a86d55"],
-    [58, 28, 22, 18, 42, "#c08d7a"],
-    [2, 14, 18, 16, 28, "#946c55"],
-    [-60, 30, 17, 22, 24, "#aa8064"],
-    [-108, 82, 16, 16, 14, "#b85d42"],
-    [-28, 102, 21, 15, 34, "#8f7462"],
-    [48, 100, 18, 18, 30, "#b77962"],
-    [108, 78, 16, 20, 18, "#9e6250"],
+    [-104, -88, 16, 18, 18, "#d95a45"],
+    [-58, -98, 20, 14, 30, "#e0a06a"],
+    [10, -94, 17, 19, 24, "#f0755d"],
+    [80, -84, 19, 17, 38, "#d94b42"],
+    [106, -24, 14, 22, 20, "#f08b62"],
+    [58, 28, 22, 18, 42, "#efb079"],
+    [2, 14, 18, 16, 28, "#d86b55"],
+    [-60, 30, 17, 22, 24, "#eda064"],
+    [-108, 82, 16, 16, 14, "#e7503f"],
+    [-28, 102, 21, 15, 34, "#d99262"],
+    [48, 100, 18, 18, 30, "#f26e55"],
+    [108, 78, 16, 20, 18, "#dc6a4d"],
+    [-100, -18, 14, 18, 22, "#f19b59"],
+    [-24, -36, 16, 14, 26, "#e65f4d"],
+    [34, -34, 14, 16, 24, "#eab06c"],
+    [94, 36, 15, 15, 24, "#f36f57"],
   ];
   for (const b of buildings) addVoxelWall(...b);
 
-  for (let i = 0; i < 90; i++) {
+  for (let i = 0; i < 62; i++) {
     addTree(randomBetween(-118, 118), randomBetween(-118, 118));
   }
 }
@@ -243,7 +247,7 @@ function serializeBlock(block) {
   };
 }
 
-function serializePlayer(player) {
+function serializePlayer(player, rank) {
   return {
     id: player.id,
     name: player.name,
@@ -258,22 +262,48 @@ function serializePlayer(player) {
     eatCountdown: player.eatCountdown,
     dead: Boolean(player.dead),
     coins: player.coins,
+    rank,
   };
 }
 
-function leaderboard() {
+function rankedPlayers() {
   return [...players.values()]
     .sort((a, b) => b.size - a.size)
+    .map((player, idx) => ({ player, rank: idx + 1 }));
+}
+
+function leaderboard(ranked = rankedPlayers()) {
+  return ranked
     .slice(0, 8)
-    .map((p, idx) => ({ rank: idx + 1, id: p.id, name: p.name, size: p.size }));
+    .map(({ player: p, rank }) => ({ rank, id: p.id, name: p.name, size: p.size }));
+}
+
+function serializePlayersWithRanks(ranked = rankedPlayers()) {
+  return ranked
+    .map(({ player, rank }) => serializePlayer(player, rank));
+}
+
+function worldStatePayload(extra = {}) {
+  const ranked = rankedPlayers();
+  return {
+    ...extra,
+    players: serializePlayersWithRanks(ranked),
+    leaderboard: leaderboard(ranked),
+  };
+}
+
+function playerRank(player) {
+  let rank = 1;
+  for (const other of players.values()) {
+    if (other.size > player.size) rank += 1;
+  }
+  return rank;
 }
 
 function broadcastSnapshot() {
-  io.emit("worldSnapshot", {
+  io.emit("worldSnapshot", worldStatePayload({
     t: Date.now(),
-    players: [...players.values()].map(serializePlayer),
-    leaderboard: leaderboard(),
-  });
+  }));
 }
 
 function makePlayer(socket, name, hubProfile) {
@@ -295,7 +325,7 @@ function makePlayer(socket, name, hubProfile) {
     unreportedBlocks: 0,
     playersEaten: 0,
     bestSize: PLAYER_START_SIZE,
-    nextMilestone: 5,
+    nextMilestone: 9,
     coins: hubProfile?.coins || 0,
     sessionReported: false,
     nextPeriodicReportAt: Date.now() + 60000,
@@ -357,7 +387,7 @@ function consumeBlock(player, block) {
 
   if (player.size >= player.nextMilestone) {
     player.pendingPlayerCoins = (player.pendingPlayerCoins || 0) + 2;
-    player.nextMilestone += 5;
+    player.nextMilestone += 9;
     maybeReportProgress(player, "size milestone");
   }
 }
@@ -567,15 +597,13 @@ io.on("connection", (socket) => {
       maybeReportProgress(player, "session start");
     }
 
-    socket.emit("worldInit", {
+    socket.emit("worldInit", worldStatePayload({
       selfId: socket.id,
       worldSize: WORLD_SIZE,
       blocks: [...blocks.values()].map(serializeBlock),
-      players: [...players.values()].map(serializePlayer),
-      leaderboard: leaderboard(),
       coins: player.coins,
-    });
-    io.emit("playerJoined", serializePlayer(player));
+    }));
+    io.emit("playerJoined", serializePlayer(player, playerRank(player)));
   });
 
   socket.on("input", (input = {}) => {

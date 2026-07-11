@@ -11,6 +11,7 @@ const playerNameText = document.getElementById("playerNameText");
 const hud = document.getElementById("hud");
 const sizeReadout = document.getElementById("sizeReadout");
 const walletReadout = document.getElementById("walletReadout");
+const playerCount = document.getElementById("playerCount");
 const leaderboardList = document.getElementById("leaderboardList");
 const eatOverlay = document.getElementById("eatOverlay");
 const eatOverlayText = document.getElementById("eatOverlayText");
@@ -100,13 +101,13 @@ scene.add(wallGroup);
 const blockGeometry = new THREE.BoxGeometry(1, 1, 1);
 const materialCache = new Map();
 const windowMaterial = new THREE.MeshStandardMaterial({
-  color: "#bfe4f5",
+  color: "#65d9ff",
   transparent: true,
-  opacity: 0.8,
-  roughness: 0.18,
+  opacity: 0.86,
+  roughness: 0.12,
   metalness: 0.02,
-  emissive: "#6baec8",
-  emissiveIntensity: 0.16,
+  emissive: "#28bfff",
+  emissiveIntensity: 0.28,
 });
 
 const GRAVITY = 22;
@@ -458,12 +459,12 @@ function rebuildArena(size) {
   }
 }
 
-function makeNameSprite(text) {
+function makeNameSprite(text, size = 1, rank = null) {
   const c = document.createElement("canvas");
   c.width = 512;
   c.height = 128;
   const ctx = c.getContext("2d");
-  drawNameTag(ctx, c, text, 1);
+  drawNameTag(ctx, c, text, size, rank);
   const texture = new THREE.CanvasTexture(c);
   const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, transparent: true }));
   sprite.scale.set(NAME_LABEL_BASE_WIDTH, NAME_LABEL_BASE_HEIGHT, 1);
@@ -471,22 +472,25 @@ function makeNameSprite(text) {
   sprite.userData.ctx = ctx;
   sprite.userData.texture = texture;
   sprite.userData.name = text;
-  sprite.userData.size = "1.0";
+  sprite.userData.size = size.toFixed(1);
+  sprite.userData.rank = Number.isFinite(rank) ? rank : null;
   return sprite;
 }
 
-function updateNameSprite(sprite, name, size) {
-  if (!sprite || (sprite.userData.name === name && sprite.userData.size === size.toFixed(1))) return;
+function updateNameSprite(sprite, name, size, rank) {
+  const rankKey = Number.isFinite(rank) ? rank : null;
+  if (!sprite || (sprite.userData.name === name && sprite.userData.size === size.toFixed(1) && sprite.userData.rank === rankKey)) return;
   const ctx = sprite.userData.ctx;
   const c = sprite.userData.canvas;
-  drawNameTag(ctx, c, name, size);
+  drawNameTag(ctx, c, name, size, rankKey);
   sprite.userData.texture.needsUpdate = true;
   sprite.userData.name = name;
   sprite.userData.size = size.toFixed(1);
+  sprite.userData.rank = rankKey;
 }
 
-function drawNameTag(ctx, c, name, size) {
-  const sizeText = `size: ${size.toFixed(1)}`;
+function drawNameTag(ctx, c, name, size, rank) {
+  const sizeText = Number.isFinite(rank) ? `#${rank} · size: ${size.toFixed(1)}u` : `size: ${size.toFixed(1)}u`;
   ctx.clearRect(0, 0, c.width, c.height);
   ctx.textAlign = "center";
   ctx.textBaseline = "alphabetic";
@@ -697,7 +701,7 @@ function createPlayerMesh(player) {
   shadow.rotation.x = -Math.PI / 2;
   shadow.position.y = 0.04;
 
-  const label = makeNameSprite(player.name);
+  const label = makeNameSprite(player.name, player.size, player.rank);
 
   scene.add(group);
   scene.add(shadow);
@@ -726,7 +730,7 @@ function upsertPlayer(player) {
     players.set(player.id, entry);
   }
   entry.target = player;
-  updateNameSprite(entry.label, player.name, player.size);
+  updateNameSprite(entry.label, player.name, player.size, player.rank);
 }
 
 function removePlayer(id) {
@@ -840,6 +844,10 @@ function renderHud(snapshot) {
   }
 
   walletReadout.textContent = walletCoins === null ? "" : `Coins: ${walletCoins}`;
+  if (playerCount) {
+    const count = snapshot.players.length;
+    playerCount.textContent = `${count} ${count === 1 ? "playing" : "playing"}`;
+  }
   leaderboardList.innerHTML = "";
   for (const item of snapshot.leaderboard || []) {
     const li = document.createElement("li");
