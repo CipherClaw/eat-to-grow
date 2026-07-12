@@ -144,7 +144,13 @@ const UNSTUCK_EDGE_RECOVERY_STEP = 4;
 const EAT_PARTICLE_COUNT = 36;
 const EAT_PARTICLE_RATE = 34;
 const EAT_PARTICLE_LIFETIME = 0.75;
-const CAMERA_OCCLUSION_MIN_STANDOFF = 2.8;
+const CAMERA_DISTANCE_BASE = 4.8;
+const CAMERA_DISTANCE_SCALE_MULTIPLIER = 2.9;
+const CAMERA_DISTANCE_MAX = 54;
+const CAMERA_OCCLUSION_MIN_STANDOFF = 1.2;
+const CAMERA_OCCLUSION_SCALE_STANDOFF = 0.2;
+const CAMERA_OCCLUSION_CLOSE_MIN_DISTANCE = 1.4;
+const CAMERA_OCCLUSION_SURFACE_PADDING = 0.4;
 const CAMERA_OCCLUSION_MAX_BLOCK_CANDIDATES = 120;
 const CAMERA_OCCLUSION_MAX_QUERY_RADIUS = 80;
 
@@ -1355,7 +1361,7 @@ function animate() {
     const pos = self.group.position;
     const size = Math.max(1, self.current.size);
     const scale = playerScale(size);
-    const distance = 4.1 + Math.sqrt(size) * 1.95;
+    const distance = Math.min(CAMERA_DISTANCE_MAX, CAMERA_DISTANCE_BASE + scale * CAMERA_DISTANCE_SCALE_MULTIPLIER);
     const eyeHeight = 0.95 + scale * 2.05;
     const elev = pitch;
     const horiz = distance * Math.cos(elev);
@@ -1366,7 +1372,7 @@ function animate() {
       Math.max(0.85, eye.y + vert),
       eye.z - Math.cos(yaw) * horiz
     );
-    const minCameraStandoff = Math.max(CAMERA_OCCLUSION_MIN_STANDOFF, scale * 0.65);
+    const minCameraStandoff = Math.max(CAMERA_OCCLUSION_MIN_STANDOFF, scale * CAMERA_OCCLUSION_SCALE_STANDOFF);
     const cameraTarget = resolveCameraOcclusion(eye, desiredCamera, distance, pos, minCameraStandoff);
     if (isFiniteVector3(eye) && isFiniteVector3(desiredCamera) && isFiniteVector3(cameraTarget)) {
       camera.position.lerp(cameraTarget, 0.18);
@@ -1411,8 +1417,12 @@ function resolveCameraOcclusion(eye, desiredCamera, cameraDistance, playerPos, m
 
   const hits = cameraRaycaster.intersectObjects(cameraHitCandidates, false);
   if (hits.length === 0) return desiredCamera;
-  if (hits[0].distance <= minStandoff) return desiredCamera;
-  const clampedDistance = Math.max(minStandoff, hits[0].distance - 0.4);
+  const beforeHitDistance = Math.max(0.35, hits[0].distance - CAMERA_OCCLUSION_SURFACE_PADDING);
+  if (hits[0].distance <= minStandoff) {
+    const closeDistance = Math.max(CAMERA_OCCLUSION_CLOSE_MIN_DISTANCE, minStandoff * 0.5);
+    return eye.clone().addScaledVector(cameraRayDirection, Math.min(closeDistance, beforeHitDistance));
+  }
+  const clampedDistance = Math.max(minStandoff, beforeHitDistance);
   return eye.clone().addScaledVector(cameraRayDirection, clampedDistance);
 }
 

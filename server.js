@@ -430,7 +430,7 @@ function consumeBlock(player, block) {
   }
 }
 
-function occupiedBuildingIds() {
+function occupiedBuildingIds(now = Date.now()) {
   const occupied = new Set();
   const margin = 1.5;
   for (const player of players.values()) {
@@ -441,6 +441,7 @@ function occupiedBuildingIds() {
       if (player.x > footprint.cx + footprint.halfW + radius) continue;
       if (player.z < footprint.cz - footprint.halfD - radius) continue;
       if (player.z > footprint.cz + footprint.halfD + radius) continue;
+      footprint.disturbedUntil = now + BLOCK_REGEN_MS;
       occupied.add(buildingId);
     }
   }
@@ -582,7 +583,7 @@ function tick() {
   }
   updatePlayerEating();
 
-  const occupiedBuildings = occupiedBuildingIds();
+  const occupiedBuildings = occupiedBuildingIds(now);
   for (const block of blocks.values()) {
     if (!block.active && block.respawnAt <= now) {
       if (blockRespawnBlocked(block, occupiedBuildings, now)) {
